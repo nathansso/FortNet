@@ -22,8 +22,10 @@ Implement `fights.py` v1: segment fights from player-to-player damage between te
   - Self-hits are ~0%.
   - Filtering to player-to-player with `magnitude > 0` leaves **36,076 rows**.
   - Teams at hit time (from `teams`, using the last assignment at or before `t`) resolve for 100% of those. Friendly fire is 0.03%.
-- **Gaps between consecutive damage events for the same team pair:** median 0.2 s, 75th percentile 0.9 s, 90th 4.5 s, 95th 14.6 s, 99th 103 s. Team-pair segments by gap threshold: 5 s → 3,211, 10 s → 2,141, 15 s → 1,668, 20 s → 1,384.
-- **Knocks/elims vs. damage:** time from the last recorded damage on the victim to the knock is a median of 0.78 s, but the 90th percentile is ~200 s. In roughly 10% of knocks the damage that caused them wasn't recorded, usually because the fight was outside the recorder's view range. Labels must account for this (Phase 2 step 5).
+- **Gaps between consecutive damage events for the same team pair:** median 0.2 s, 75th percentile 0.9 s, 90th 4.5 s, 95th 14.6 s, 99th 103 s. Team-pair segments by gap threshold, across 2,150 distinct (match, team pair) groups: 5 s → 5,361, 10 s → 4,291, 15 s → 3,818, 20 s → 3,534. (Corrected 2026-10-01 from Phase 1; the original figures counted splits, not segments.)
+- **Knocks vs. damage** (corrected 2026-10-01 from Phase 1):
+  - **Recorder-involved knocks (468):** only 0.6% have no recorded damage on the victim; time from last damage to the knock is a median of 0.14 s, 90th percentile 2.2 s. 96.8% fall inside a team-pair segment at gap 10 s plus 3 s grace.
+  - **All lobby knocks (5,072):** 47.3% have no damage ever recorded on the victim, and the 90th percentile is ~211 s, because most are outside the recorder's view range. Labels for non-recorder fights must account for this (Phase 2 step 5).
 - **`matches.team_size` is mis-decoded** (values like 24 and 25). Derive team size from `teams`.
 - **Mode:** most matches are Zero Build duos/squads, and 3 are Creative build matches. 6% of `teams` rows are bots (`BOT_*` or bot unique ids).
 - **Clocks:** `damage.t`, `positions.t` and `elims.t_ms/1000` share one clock, aligned to ~15 ms.
@@ -57,7 +59,7 @@ Keep v0 in place for now; rename its public functions with a `killfeed_` prefix 
 
 1. **Engagement damage:** `target` and `source` not null, `source != target`, `magnitude > 0`. Attach `source_team` and `target_team` (team at `t`, by `merge_asof` per player per match). Drop rows with an unknown team or friendly fire.
 2. **Team-pair segments:** for each match and unordered team pair, sort by `t` and start a new segment when the gap exceeds `GAP_S` (start with 10 s and tune in Phase 4).
-3. **Fights:** merge segments that share a team and overlap in time (or are within `GAP_S` of each other) into one fight. `multi_team = number of teams > 2`. A two-team fight has exactly one pair.
+3. **Fights:** merge segments that share a team and **truly overlap in time**, within a tolerance `OVERLAP_TOL_S` (start at 0–3 s), into one fight. Don't merge on `GAP_S` proximity: back-to-back fights (A–B ends, then A–C starts) stay separate, since the carry-over state is captured by snapshot features at the next `t0`. `multi_team = number of teams > 2`. A two-team fight has exactly one pair. (Decided 2026-10-01 after Phase 1: merging within `GAP_S` made 38% of fights multi-team and chained up to 13 teams over 192 s; true overlap gives ~16% multi-team.)
 4. **Times:** `t0` = first engagement damage in the fight. `t_end` = last engagement damage.
 5. **Outcome per side:**
    - Use opposing-team knocks/elims from `elims`: the eliminated player is on one fight team, and the eliminator is on another fight team.
@@ -79,7 +81,7 @@ Keep v0 in place for now; rename its public functions with a `killfeed_` prefix 
 
 ### Phase 4: tune and check
 
-1. **Sensitivity:** for `GAP_S` in {5, 10, 15, 20} and `GRACE_S` in {1, 3, 5}, report number of fights, outcome shares (win/loss/tie/disengage), duration distribution, and recorder-knock coverage (the quality gate). Choose values and record them in the `docs/architecture.md` Decisions table with the numbers that justified them.
+1. **Sensitivity:** for `GAP_S` in {5, 10, 15, 20}, `GRACE_S` in {1, 3, 5} and `OVERLAP_TOL_S` in {0, 1, 2, 3}, report number of fights, outcome shares (win/loss/tie/disengage), duration distribution, and recorder-knock coverage (the quality gate). Choose values and record them in the `docs/architecture.md` Decisions table with the numbers that justified them.
 2. **Visual check (stop here for the user):** write `scripts/plot_fights.py`. It renders N random recorder-involved fights to PNGs under `data/reports/fights/`, which is git-ignored:
    - top-down tracks from `positions` for each participant, from `t0` − 5 s to `t_end` + 5 s, colored by team;
    - damage events as source → target segments;

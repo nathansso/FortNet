@@ -1,4 +1,4 @@
-# Fortnite placement forecasting
+# FortNet: Fortnite placement forecasting
 
 Forecast pro Fortnite placements at Majors/LANs from replay telemetry and results history, and test whether age adds signal beyond fight skill, reaction latency, tenure, cohort and era.
 
@@ -23,7 +23,7 @@ uv run pytest
 ```
 
 In a git worktree, `data/` doesn't exist (it's git-ignored). Point both the Python package and the exporter at the main checkout's data:
-`export FNF_DATA_DIR="C:/Users/noliv/Desktop/coding_projects/fortnite_placement_forecasting/data"`. Treat `data/raw` as shared and append-only. If two sessions run `fnf-build-tables` at once, they overwrite each other's `data/processed`, so coordinate, or give a session its own copy of `data/processed` work.
+`export FNF_DATA_DIR="<absolute path to the main checkout>/data"` (`git worktree list` shows the main checkout). Treat `data/raw` as shared and append-only. If two sessions run `fnf-build-tables` at once, they overwrite each other's `data/processed`, so coordinate, or give a session its own copy of `data/processed` work.
 
 ## Rules
 

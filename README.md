@@ -1,4 +1,6 @@
-# Fortnite placement forecasting
+# FortNet
+
+Fortnite placement forecasting from replay telemetry and competitive results.
 
 Forecast pro Fortnite players' placements at Majors and LANs from their history, and test whether age adds signal once tenure, debut cohort, format era and activity are accounted for.
 
@@ -72,3 +74,7 @@ Validation (builds): in the Sept 12 Creative match, the recorder's new pieces ×
 ## Data handling
 
 Replays contain other players' Epic account IDs and display names, and many pros are minors. `data/` is git-ignored. Publish only aggregated results.
+
+## License
+
+Code is MIT licensed (see [LICENSE](LICENSE)). Data is not included; see [docs/data_sourcing.md](docs/data_sourcing.md) for sources and their terms.

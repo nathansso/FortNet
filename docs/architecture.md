@@ -1,6 +1,6 @@
 # Architecture: from fights to placement forecasts
 
-Status: plan, agreed 2026-09-30; data splits added 2026-10-01. Stage 1 is the active work. Stages 2 and 3 are designed but gated on data (see "Entry criteria" in each).
+Status: plan, agreed 2026-09-30; data splits, fight v1 and pokes added 2026-10-01. Stage 1 is the active work. Stages 2 and 3 are designed but gated on data (see "Entry criteria" in each).
 
 ## Goal
 
@@ -46,6 +46,14 @@ Fight models (Stages 1–2) never see player identity: no player ID, name, embed
 
 The fight model may train on any lobby (pubs, ranked, cash cups). "Who should win this spot" doesn't need pro data, and more fights make it better. Player-level features and the forecaster use pros only.
 
+### Label calibration and relabeling
+
+Every rule-based label (fight boundaries, outcomes, poke vs. fight, poke conversion windows) has thresholds that were first tuned on **local client replays: mostly Zero Build pubs, recorder-involved fights only**. Those are v1 values for building the pipeline, not final ones.
+- Before any model is trained for pro features, **re-tune and relabel on competitive Build data** (tournament server replays or pros' own replays). Rerun the parameter sweep, the visual review of example plots (including build fights) and the quality gates, then record the new values in Decisions.
+- Build mode changes the data itself. Builds absorb damage, fights last longer, more damage hits structures, and pokes often target walls and tarps (long protected rotation tunnels). Gap, grace and poke thresholds are expected to move.
+- One definition is used across all data, tuned on competitive Build data, because that's what the final models serve. Pub data can still pretrain under it.
+- Labeled tables carry a `seg_version` string (the parameter set that produced them), so models and features record which labels they used.
+
 ### Data handling
 
 Replays contain account IDs and display names, and many pros are minors. `data/` is never committed. Only aggregated results are published.
@@ -54,19 +62,46 @@ Replays contain account IDs and display names, and many pros are minors. `data/`
 
 ### 1.1 Fight segmentation (replaces kill-feed v0)
 
-Source: the `damage`, `positions`, `teams`, `elims` and `players` tables.
+Source: the `damage`, `positions`, `teams`, `elims` and `players` tables. Implementation: `src/fnf/fights.py` v1 (handoff 02). All thresholds are v1 values, subject to [relabeling](#label-calibration-and-relabeling).
 
-- **Engagement:** player-to-player damage (`target` not null, `source != target`, `magnitude > 0`) between two teams, using `teams` as of the event time.
-- **Grouping:** within a match, link damage events between the same pair of teams when they're ≤ `GAP_S` apart (start with 10 s, tune by inspection). Third-party damage within the window merges in as a multi-team fight. Version 1 keeps two-team fights only and flags the rest.
+- **Engagement damage:** player-to-player damage (`target` not null, `source != target`, `magnitude > 0`) between different teams, using `teams` as of the hit time.
+- **Team-pair segments:** per match and team pair, a new segment starts when the gap between hits exceeds `GAP_S` (v1: 10 s; 5 s under review).
+- **Fights:** segments that share a team merge into one fight only when they **truly overlap in time**, within `OVERLAP_TOL_S` (v1: 1 s, swept 0–3 s). Back-to-back fights (A–B ends, then A–C starts) stay separate; the carried-over state (health, position) is captured by the next fight's snapshot at `t0`. Merging on gap proximity instead made 38% of fights multi-team and chained up to 13 teams.
 - **Engagement start** `t0`: the first damage event of the fight. Snapshot features are taken at `t0`, before any damage resolves.
-- **Outcome label (per team):**
-  - `win` = the opponent team has a member knocked or eliminated first, and this team doesn't.
-  - `loss` = the reverse.
-  - `disengage` = no knock within the fight. Excluded from the v1 training target and counted separately.
-  - Ties (both knocked within 1 s) are dropped.
-- **Output table** `fight_sides`: one row per (fight, team), with participants, `t0`, end, outcome and multi-team flag.
+- **Engagement type** (per fight): `fight` when both sides deal meaningful damage; `poke` when it's one-sided (not `mutual`, or the minority side dealt less than `POKE_MINORITY_SHARE` of total damage; v1 ≈ 10%). See [1.1a](#11a-pokes-and-zone-pressure).
+- **Fight outcome (per side, `engagement_type = fight`):**
+  - `win` = an opposing member is knocked or eliminated first, within `[t0, t_end + GRACE_S]` (v1: 3 s);
+  - `loss` = the reverse;
+  - `tie` = both sides' first knocks within 1 s;
+  - `disengage` = no knock. Kept as its own class, not dropped.
+- **Output table** `fight_sides`: one row per (fight, team), with participants, `t0`, end, outcome, `engagement_type`, `mutual`, hits/damage per side, distance, `multi_team`, `recorder_involved`, `has_bots` and `seg_version`.
 
-Current data: 36k player-to-player damage events across 98 client replays, enough to build and debug segmentation. Distant fights are missing because of relevancy.
+v1 numbers (98 local client replays, `GAP_S` 10 / tolerance 1 / grace 3): 3,217 fights, 20.6% multi-team. 97.2% of recorder-involved opposing-team knocks fall in a fight with a decisive outcome.
+
+### 1.1a Pokes and zone pressure
+
+In competitive play, a poke is usually zone pressure: a team that rotated early and holds a good position inside the next zone chips a team rotating late across open ground under storm pressure. A poke rarely produces a knock directly. Its value is what it causes next. So pokes are kept as their own engagement type with their own outcome and skill measure, never counted as failed fights.
+
+**Poke outcomes** (per poke, labeled in `fight_sides` or a sibling table):
+
+| Outcome | Definition (v1, to re-tune on competitive Build data) | Source |
+|---|---|---|
+| Net damage | Damage dealt − damage taken in the poke | `damage` |
+| Conversion | Target knocked or eliminated by **anyone** within `POKE_CONVERT_S` after the poke ends (start 20 s) | `elims` |
+| Storm death | Target dies within `POKE_CONVERT_S` while flagged `in_storm` | `players`, `positions` |
+| Forced heal | Target's health/shield rises without a pickup within N s | `health`; recorder-only in client replays, so server replays only |
+| Structure pressure | Damage to structures within ~2 tiles of target players during the poke | `damage` (`target` null) + `positions`; matters in Build, where pokes hit walls and tarps |
+
+**Zone context** (snapshot features at `t0`, part of 1.2, for fights and pokes):
+- distance of each side to the current and next safe-zone edge (inside or outside, in uu);
+- time until the next shrink;
+- whether each side's players are moving toward the zone (velocity · direction to zone center);
+- the **rotation timing** of each team in the current storm phase: when its players entered the next zone relative to that phase's shrink start (early, on time or late), computed from `positions` and `safezones`;
+- height difference, as in 1.2.
+
+**Skill measures** (same pattern as FWAE):
+- **Poke value above expected (PVAE):** a small model predicts poke outcomes (conversion probability, expected net damage) from the poke's `t0` snapshot. PVAE = actual − expected, credited to the poking side by damage share, aggregated and shrunk per player like FWAE.
+- **Rotation quality:** for the poked side, damage taken (and conversions suffered) per late rotation, compared with expected. Rotation timing itself (early/late share per player) also becomes a forecaster feature.
 
 ### 1.2 Snapshot features at `t0`
 
@@ -79,7 +114,8 @@ Per side (sum/mean/max over the team's players present), plus differences betwee
 | Geometry | horizontal distance, height difference, closing speed, facing angle toward opponent | `positions` |
 | Loadout | held item class at `t0` (shotgun / AR / SMG / sniper / build tool / other) | `weapons` |
 | Cover | own and enemy pieces within 2 tiles, pieces between the sides, high-ground pieces | `pieces` |
-| Context | storm phase, distance to next safe zone, time into match, other teams within N m (third-party risk), season/patch | `safezones`, `matches` |
+| Context | storm phase, time into match, other teams within N m (third-party risk), season/patch | `safezones`, `matches` |
+| Zone and rotation | per side: distance to current and next zone edge, inside/outside, moving toward zone, team rotation timing this phase (see 1.1a) | `safezones`, `positions` |
 
 No identity fields (see [Identity exclusion](#identity-exclusion)).
 
@@ -96,6 +132,7 @@ Train with log loss and check calibration (reliability curves, Brier). Split by 
 - **Per fight:** each side's residual = outcome (1/0) − P(win). Players on the side share it in proportion to their damage dealt in the fight, with an equal split as a sensitivity check.
 - **Per player, before event *E*:** sum the residuals over fights in a window before *E* (start with 90 days), then shrink toward 0: `FWAE = Σr / (n + k)`. Fit `k` by split-half reliability.
 - **Variants:** FWAE when outnumbered or at a health disadvantage, FWAE in build fights vs. no-build fights, fight volume.
+- **Companion measures:** PVAE (poke value above expected) and rotation quality from [1.1a](#11a-pokes-and-zone-pressure), aggregated and shrunk the same way and passed through the same reliability gate.
 - **Reliability gate:** split-half (odd/even fights) correlation of FWAE across players ≥ 0.5 at the chosen window. If it fails, lengthen the window or drop the variant.
 
 ### 1.5 Latency features (hand-built)
@@ -248,12 +285,17 @@ Each feature builder or model that takes a cutoff gets a test in `tests/` showin
 | 2026-09-30 | Builder attribution: team at spawn → holding build tool (new pieces) → nearest | 95% team-blind accuracy on 1,142 labeled pieces (see README) |
 | 2026-10-01 | Splits v1: 20% player holdout (`fnf-holdout-v1`), chronological 70/15/15 by match for fight models, 5-fold out-of-fold residuals (`fnf-folds-v1`), rolling origin by event date for the forecaster | Deterministic and reproducible across sessions. Out-of-fold residuals keep fight-skill features from being shrunk by memorization |
 | 2026-10-01 | Fight-model splits move from match to tournament session once tournament data exists | Matches in one session share players and conditions |
+| 2026-10-01 | Fights merge only on true time overlap (tolerance swept 0–3 s), not gap proximity | Gap-proximity merging made 38% of fights multi-team and chained unrelated back-to-back fights |
+| 2026-10-01 | Pokes are a separate engagement type with their own outcomes (conversion, storm death, net damage, structure pressure) and skill measure (PVAE), plus zone and rotation context | Zone-edge poking of late rotators is a core competitive skill; counting pokes as failed fights would lose it |
+| 2026-10-01 | All segmentation and poke thresholds are v1 (tuned on local Zero Build pub replays) and must be re-tuned and relabeled on competitive Build data before training models for pro features; tables carry `seg_version` | Build mode and competitive tempo change damage, gap and poke distributions |
 
 ## Open questions
 
 - Do tournament server replays fill in piece `OwnerPersistentID` / `EditingPlayer`? If so, they replace inferred builders.
 - What's the sanctioned source for tournament server replays at scale? See [data_sourcing.md](data_sourcing.md), section 2.
-- What's the right outcome label for fights that end in disengagement: exclude, a third class, or net damage?
+- Disengage outcome: resolved as its own class for fights; one-sided engagements are pokes with their own outcomes (1.1a).
+- Poke thresholds: `POKE_MINORITY_SHARE`, `POKE_CONVERT_S`, and the structure-pressure radius. Set from competitive Build data.
+- Does poke conversion credit the poker when a third team takes the knock? Proposed yes for team-level zone pressure, reported separately from self-converted pokes.
 - How should duo/trio credit be split: by damage share or by Stage 2 WPA?
 
 ## Planned code layout

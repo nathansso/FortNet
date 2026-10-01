@@ -365,10 +365,17 @@ Damage-based fights (architecture 1.1, src/fnf/fights.py): player-to-player dama
 | `outcome` | string |  |  | win \| loss \| tie \| disengage (first opposing-team knock in [t0, t_end + GRACE_S] decides) |
 | `multi_team` | bool |  |  | More than two teams in the fight; excluded from v1 training |
 | `n_damage_events` | int |  |  | Engagement damage events involving this side (dealt or taken) |
+| `hits_dealt` | int |  |  | Engagement hits this side landed on the fight's other teams |
+| `hits_taken` | int |  |  | Engagement hits this side took from the fight's other teams |
 | `damage_dealt` | float |  |  | Damage this side dealt to the fight's other teams |
 | `damage_taken` | float |  |  | Damage this side took from the fight's other teams |
 | `recorder_involved` | bool |  |  | matches.replay_owner is among the fight's engaged players (any side) |
 | `has_bots` | bool |  |  | Any engaged player in the fight (any side) is a bot |
+| `mutual` | bool |  |  | Fight-level: at least two teams dealt player damage |
+| `minority_damage_share` | float |  |  | Fight-level: second-largest dealing team's share of the fight's total damage (0 if one-sided) |
+| `engagement_type` | string |  |  | Fight-level: fight \| poke. Poke = not mutual, or minority_damage_share < POKE_MIN_SHARE; never dropped |
+| `dist_median_m` | float | yes | m | Fight-level: median shooter-target distance over hits; null if positions unknown |
+| `dist_max_m` | float | yes | m | Fight-level: max shooter-target distance over hits; null if positions unknown |
 
 ## Processed (planned)
 

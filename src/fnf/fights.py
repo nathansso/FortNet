@@ -114,6 +114,15 @@ DIRECT_ELIM_ALL_MODES = False
 """An elimination with no earlier knock of that victim counts as a knock. Always true for solo matches. If False,
 team modes ignore such eliminations (the plan's default); if True they count too (last alive teammate dying)."""
 
+POKE_MIN_SHARE = 0.10
+"""A fight is a `poke` if it is not mutual (only one team dealt damage) or the second-largest dealing team
+dealt less than this share of the fight's total damage; otherwise it is a `fight`. Pokes are classified, never
+dropped: zone-edge poking is a skill in its own right. Provisional, swept in scripts/sweep_fights.py."""
+
+HIT_POS_MAX_AGE_S = 2.0
+"""A player's position counts for a hit's shooter-target distance only if the last position update is at most this
+old (distant pawns update rarely in client replays)."""
+
 
 def team_at(df: pd.DataFrame, player_col: str, time_col: str, teams: pd.DataFrame) -> pd.Series:
     """Team of `df[player_col]` at `df[time_col]`: the last `teams` row at or before that time, per match and player.
@@ -257,15 +266,33 @@ def label_outcomes(fight_teams: set[int], t0: float, t_end: float, ev: pd.DataFr
     return out
 
 
+def hit_distances(eng: pd.DataFrame, positions: pd.DataFrame, max_age_s: float = HIT_POS_MAX_AGE_S) -> pd.Series:
+    """3-D shooter-to-target distance in metres at each engagement hit (NaN if either position is missing/stale)."""
+    pos = positions[["match_id", "player_id", "t", "x", "y", "z"]].dropna(subset=["player_id"])
+    pos = pos.astype({"match_id": "object", "player_id": "object"}).sort_values("t")
+    out = eng[["match_id", "t"]].astype({"match_id": "object"}).assign(_i=np.arange(len(eng)))
+    xyz = {}
+    for who in ("source", "target"):
+        left = out.assign(player_id=eng[who].to_numpy()).astype({"match_id": "object", "player_id": "object"})
+        left = left.sort_values("t")
+        got = pd.merge_asof(left, pos, on="t", by=["match_id", "player_id"], direction="backward",
+                            tolerance=max_age_s).sort_values("_i")
+        xyz[who] = got[["x", "y", "z"]].to_numpy()
+    d = np.sqrt(((xyz["source"] - xyz["target"]) ** 2).sum(axis=1)) / 100
+    return pd.Series(d, index=eng.index)
+
+
 def build_fight_sides(
     damage: pd.DataFrame, teams: pd.DataFrame, elims: pd.DataFrame, players: pd.DataFrame, matches: pd.DataFrame,
+    positions: pd.DataFrame | None = None,
     *, gap_s: float = GAP_S, overlap_tol_s: float = OVERLAP_TOL_S, grace_s: float = GRACE_S, tie_s: float = TIE_S,
-    direct_elim_all_modes: bool = DIRECT_ELIM_ALL_MODES,
+    direct_elim_all_modes: bool = DIRECT_ELIM_ALL_MODES, poke_min_share: float = POKE_MIN_SHARE,
 ) -> pd.DataFrame:
     """One row per (fight, team): the `fight_sides` table. See docs/architecture.md 1.1 and the module constants."""
     eng = group_fights(engagement_damage(damage, teams), gap_s, overlap_tol_s)
     cols = ["fight_id", "match_id", "team_index", "opp_team_index", "t0", "t_end", "players", "outcome", "multi_team",
-            "n_damage_events", "damage_dealt", "damage_taken", "recorder_involved", "has_bots"]
+            "n_damage_events", "hits_dealt", "hits_taken", "damage_dealt", "damage_taken", "recorder_involved",
+            "has_bots", "mutual", "minority_damage_share", "engagement_type", "dist_median_m", "dist_max_m"]
     if eng.empty:
         return pd.DataFrame({c: [] for c in cols})
 
@@ -276,8 +303,11 @@ def build_fight_sides(
                      dealt=0.0, taken=eng["magnitude"])
     sides = pd.concat([src, tgt], ignore_index=True)
     sides["flow"] = sides["dealt"] + sides["taken"]
+    sides["hit_dealt"] = (sides["dealt"] > 0).astype(int)
+    sides["hit_taken"] = (sides["taken"] > 0).astype(int)
     agg = sides.groupby(["fight_id", "team"]).agg(
-        n_damage_events=("t", "size"), damage_dealt=("dealt", "sum"), damage_taken=("taken", "sum"),
+        n_damage_events=("t", "size"), hits_dealt=("hit_dealt", "sum"), hits_taken=("hit_taken", "sum"),
+        damage_dealt=("dealt", "sum"), damage_taken=("taken", "sum"),
         players=("player", lambda s: ";".join(sorted(set(s)))),
     ).reset_index()
     # n_damage_events counts rows involving the team, either direction (each row appears once per side)
@@ -289,6 +319,22 @@ def build_fight_sides(
     span = eng.groupby("fight_id").agg(match_id=("match_id", "first"), t0=("t", "min"), t_end=("t", "max"))
     n_teams = agg.groupby("fight_id")["team"].nunique().rename("n_teams")
     fights = span.join(n_teams)
+    # Poke vs fight: per fight, shares of total damage by dealing team; minority = second-largest dealer.
+    dealt = agg.pivot_table(index="fight_id", columns="team", values="damage_dealt", aggfunc="sum").fillna(0)
+    ranked = -np.sort(-dealt.to_numpy(), axis=1)
+    total = ranked.sum(axis=1)
+    second = ranked[:, 1] if ranked.shape[1] > 1 else np.zeros(len(ranked))
+    fights["minority_damage_share"] = pd.Series(second / np.where(total > 0, total, 1), index=dealt.index)
+    fights["mutual"] = pd.Series((dealt > 0).sum(axis=1) >= 2, index=dealt.index)
+    fights["engagement_type"] = np.where(
+        fights["mutual"] & (fights["minority_damage_share"] >= poke_min_share), "fight", "poke")
+    if positions is not None:
+        eng = eng.assign(dist=hit_distances(eng, positions))
+        dist = eng.groupby("fight_id")["dist"].agg(dist_median_m="median", dist_max_m="max")
+        fights = fights.join(dist)
+    else:
+        fights["dist_median_m"] = np.nan
+        fights["dist_max_m"] = np.nan
     all_players = agg.groupby("fight_id")["players"].apply(lambda s: set(";".join(s).split(";")))
 
     owner = matches.set_index("match_id")["replay_owner"]

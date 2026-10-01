@@ -6,6 +6,7 @@ duration percentiles, recorder-knock coverage. Then: how many kill-feed v0 fight
 Usage: uv run python scripts/sweep_fights.py
 """
 
+import argparse
 import itertools
 
 import numpy as np
@@ -13,7 +14,7 @@ import pandas as pd
 
 from fnf import DATA
 from fnf.fights import (
-    GAP_S, GRACE_S, OVERLAP_TOL_S, build_fight_sides, engagement_damage, group_fights, recorder_knock_coverage,
+    GAP_S, GRACE_S, OVERLAP_TOL_S, POKE_MIN_SHARE, build_fight_sides, engagement_damage, group_fights, recorder_knock_coverage,
 )
 
 P = DATA / "processed"
@@ -84,19 +85,48 @@ def v0_vs_v1(damage, teams, elims, players, matches, fights_v0, fs) -> None:
               f"{int((~miss['any_damage_on_participants']).sum())}")
 
 
+def poke_sweep(fs: pd.DataFrame) -> None:
+    """Poke share by POKE_MIN_SHARE, from the stored fight-level `mutual` and `minority_damage_share`."""
+    print(f"\n== poke rule sweep (current POKE_MIN_SHARE={POKE_MIN_SHARE:g}); shares are % of sides ==")
+    f = fs.drop_duplicates("fight_id")
+    print(f"fights {len(f):,}; mutual {100 * f['mutual'].mean():.1f}%; "
+          f"median distance known for {100 * f['dist_median_m'].notna().mean():.1f}%")
+    rows = {}
+    for share in (0.0, 0.05, 0.10, 0.15, 0.20, 0.30):
+        poke = ~(fs["mutual"] & (fs["minority_damage_share"] >= share))
+        rows[f"min_share>={share:g}"] = {
+            "disengage sides": poke[fs["outcome"] == "disengage"].mean(),
+            "win/loss sides": poke[fs["outcome"].isin(["win", "loss"])].mean(),
+            "all sides": poke.mean(),
+            "disengage, two-team": poke[(fs["outcome"] == "disengage") & ~fs["multi_team"]].mean(),
+        }
+    print((100 * pd.DataFrame(rows)).round(1).to_string())
+    d = fs[(fs["outcome"] == "disengage") & ~fs["multi_team"]].drop_duplicates("fight_id")
+    for kind in ("poke", "fight"):
+        x = d[d["engagement_type"] == kind]
+        print(f"two-team disengage fights typed {kind}: {len(x):,}; median hits (both sides) "
+              f"{(x['hits_dealt'] + x['hits_taken']).median() / 2:.0f}; median shooter distance {x['dist_median_m'].median():.0f} m")
+
+
 def main() -> None:
-    damage, teams, elims, players, matches = (read(n) for n in ("damage", "teams", "elims", "players", "matches"))
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--skip-grid", action="store_true", help="skip the 48-cell GAP/TOL/GRACE grid (about 2 min)")
+    args = ap.parse_args()
+    damage, teams, elims, players, matches, positions = (
+        read(n) for n in ("damage", "teams", "elims", "players", "matches", "positions"))
     pd.set_option("display.width", 250, "display.max_rows", 200)
-    res = sweep(damage, teams, elims, players, matches)
-    fmt = res.copy()
-    for c in ("multi", "win", "loss", "tie", "disengage", "in_fight", "coverage"):
-        fmt[c] = (100 * fmt[c]).round(1)
-    for c in ("dur_p50", "dur_p90", "dur_max"):
-        fmt[c] = fmt[c].round(1)
-    print("== sweep (shares in %; win/loss/tie/disengage over two-team sides) ==")
-    print(fmt.to_string(index=False))
+    if not args.skip_grid:
+        res = sweep(damage, teams, elims, players, matches)
+        fmt = res.copy()
+        for c in ("multi", "win", "loss", "tie", "disengage", "in_fight", "coverage"):
+            fmt[c] = (100 * fmt[c]).round(1)
+        for c in ("dur_p50", "dur_p90", "dur_max"):
+            fmt[c] = fmt[c].round(1)
+        print("== sweep (shares in %; win/loss/tie/disengage over two-team sides) ==")
+        print(fmt.to_string(index=False))
+    fs = build_fight_sides(damage, teams, elims, players, matches, positions)
+    poke_sweep(fs)
     print(f"\n== v0 vs v1 at defaults (gap {GAP_S:g}, tol {OVERLAP_TOL_S:g}, grace {GRACE_S:g}) ==")
-    fs = build_fight_sides(damage, teams, elims, players, matches)
     v0_vs_v1(damage, teams, elims, players, matches, None, fs)
 
 

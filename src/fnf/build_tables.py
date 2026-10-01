@@ -44,7 +44,7 @@ def main() -> None:
     tables["fights"] = fights_table(elims)
     tables["player_fights"] = player_fight_outcomes(elims)
     tables["fight_sides"] = build_fight_sides(
-        tables["damage"], tables["teams"], elims, tables["players"], tables["matches"]
+        tables["damage"], tables["teams"], elims, tables["players"], tables["matches"], tables["positions"]
     )
 
     problems = []

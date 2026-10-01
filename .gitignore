@@ -1,0 +1,17 @@
+# Data: replays contain other players' account IDs; never commit
+data/
+
+# Node
+node_modules/
+cache.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# .NET
+bin/
+obj/

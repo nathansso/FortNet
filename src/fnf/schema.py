@@ -240,12 +240,22 @@ _add(Table(
 # ---------------------------------------------------------------- planned (Stage 1 and results backbone)
 _add(Table(
     "fight_sides", "processed", "data/processed/fight_sides.parquet", "fight x team", ("fight_id", "team_index"),
-    status="planned", desc="Damage-based fights (architecture 1.1).",
+    desc="Damage-based fights (architecture 1.1, src/fnf/fights.py): player-to-player damage between teams, "
+         "segmented per team pair, merged into fights when segments sharing a team overlap in time.",
     columns=(
-        _c("fight_id", "string"), MATCH_ID, _c("team_index", "int"), _c("opp_team_index", "int"),
-        _c("t0", "float", desc="Engagement start (first damage)", unit="s"), _c("t_end", "float", unit="s"),
-        _c("players", "string", desc="';'-separated player_ids engaged"),
-        _c("outcome", "string", desc="win | loss | disengage | tie"), _c("multi_team", "bool"),
+        _c("fight_id", "string", desc="f'{match_id}:{n}', n in t0 order within the match; deterministic"),
+        MATCH_ID, _c("team_index", "int", desc="This side's team (at hit time)"),
+        _c("opp_team_index", "int", desc="Primary opponent: the other fight team this side exchanged the most damage with"),
+        _c("t0", "float", desc="Engagement start: first engagement damage of the fight (same for all sides)", unit="s"),
+        _c("t_end", "float", desc="Last engagement damage of the fight", unit="s"),
+        _c("players", "string", desc="';'-separated player_ids of this side that dealt or took engagement damage"),
+        _c("outcome", "string", desc="win | loss | tie | disengage (first opposing-team knock in [t0, t_end + GRACE_S] decides)"),
+        _c("multi_team", "bool", desc="More than two teams in the fight; excluded from v1 training"),
+        _c("n_damage_events", "int", desc="Engagement damage events involving this side (dealt or taken)"),
+        _c("damage_dealt", "float", desc="Damage this side dealt to the fight's other teams"),
+        _c("damage_taken", "float", desc="Damage this side took from the fight's other teams"),
+        _c("recorder_involved", "bool", desc="matches.replay_owner is among the fight's engaged players (any side)"),
+        _c("has_bots", "bool", desc="Any engaged player in the fight (any side) is a bot"),
     ),
 ))
 _add(Table(

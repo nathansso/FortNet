@@ -347,25 +347,30 @@ Deduplicated pieces with edits and inferred builder (fnf.builds).
 | `elims_recv` | int |  |  |  |
 | `lost` | bool |  |  |  |
 
-## Processed (planned)
-
 ### `fight_sides`
 
 `data/processed/fight_sides.parquet`. Grain: fight x team. Key: `fight_id, team_index`.
 
-Damage-based fights (architecture 1.1).
+Damage-based fights (architecture 1.1, src/fnf/fights.py): player-to-player damage between teams, segmented per team pair, merged into fights when segments sharing a team overlap in time.
 
 | column | type | null | unit | description |
 |---|---|---|---|---|
-| `fight_id` | string |  |  |  |
+| `fight_id` | string |  |  | f'{match_id}:{n}', n in t0 order within the match; deterministic |
 | `match_id` | string |  |  | Replay file stem |
-| `team_index` | int |  |  |  |
-| `opp_team_index` | int |  |  |  |
-| `t0` | float |  | s | Engagement start (first damage) |
-| `t_end` | float |  | s |  |
-| `players` | string |  |  | ';'-separated player_ids engaged |
-| `outcome` | string |  |  | win \| loss \| disengage \| tie |
-| `multi_team` | bool |  |  |  |
+| `team_index` | int |  |  | This side's team (at hit time) |
+| `opp_team_index` | int |  |  | Primary opponent: the other fight team this side exchanged the most damage with |
+| `t0` | float |  | s | Engagement start: first engagement damage of the fight (same for all sides) |
+| `t_end` | float |  | s | Last engagement damage of the fight |
+| `players` | string |  |  | ';'-separated player_ids of this side that dealt or took engagement damage |
+| `outcome` | string |  |  | win \| loss \| tie \| disengage (first opposing-team knock in [t0, t_end + GRACE_S] decides) |
+| `multi_team` | bool |  |  | More than two teams in the fight; excluded from v1 training |
+| `n_damage_events` | int |  |  | Engagement damage events involving this side (dealt or taken) |
+| `damage_dealt` | float |  |  | Damage this side dealt to the fight's other teams |
+| `damage_taken` | float |  |  | Damage this side took from the fight's other teams |
+| `recorder_involved` | bool |  |  | matches.replay_owner is among the fight's engaged players (any side) |
+| `has_bots` | bool |  |  | Any engaged player in the fight (any side) is a bot |
+
+## Processed (planned)
 
 ### `events`
 

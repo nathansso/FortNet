@@ -20,6 +20,7 @@ GATES = {
     "damage_ratio_hi": 1.10,
     "position_resolution": 0.99,  # share of position rows with a player_id
     "clock_offset_s": 0.05,  # |median| downed-flag time minus knock-event time
+    "recorder_knock_coverage": 0.90,  # recorder-involved opposing-team knocks inside a v1 fight with an outcome
 }
 
 
@@ -55,6 +56,16 @@ def clock_offset() -> tuple[float, int]:
     return (float(np.median(diffs)) if diffs else float("nan")), len(diffs)
 
 
+def knock_coverage() -> tuple[float, int]:
+    from fnf.fights import recorder_knock_coverage
+
+    cov = recorder_knock_coverage(
+        pd.read_parquet(P / "elims.parquet"), pd.read_parquet(P / "fight_sides.parquet"),
+        pd.read_parquet(P / "teams.parquet"), pd.read_parquet(P / "matches.parquet"),
+    )
+    return (float(cov["covered"].mean()) if len(cov) else float("nan")), len(cov)
+
+
 def unknown_build_shapes() -> list[str]:
     gen = (ROOT / "ingest" / "gen_build_pieces.py").read_text(encoding="utf-8")
     block = gen[gen.index("SHAPES = sorted({"):gen.index("})")]
@@ -88,6 +99,10 @@ def main() -> None:
 
     off, n = clock_offset()
     report(abs(off) <= GATES["clock_offset_s"], "event/frame clocks", f"median offset {off * 1000:.0f} ms over {n} knocks")
+
+    cov, n = knock_coverage()
+    report(cov >= GATES["recorder_knock_coverage"], "recorder knock coverage",
+           f"{cov:.3f} of {n} recorder-involved opposing-team knocks inside a fight with an outcome")
 
     shapes = unknown_build_shapes()
     report(not shapes, "build shapes covered", "all known" if not shapes else f"add to gen_build_pieces.py: {shapes}")

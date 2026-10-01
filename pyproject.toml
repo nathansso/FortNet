@@ -16,7 +16,10 @@ fnf-schema-doc = "fnf.schema:write_doc"
 fnf-quality = "fnf.quality:main"
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = [
+    "matplotlib>=3.11.2",
+    "pytest>=8",
+]
 
 [build-system]
 requires = ["hatchling"]

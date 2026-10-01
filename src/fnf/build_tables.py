@@ -7,6 +7,7 @@ import argparse
 
 from fnf import DATA
 from fnf.builds import attribute_builders, detect_edits, parse_pieces
+from fnf.pokes import build_pokes
 from fnf.schema import coerce, validate
 from fnf.fights import DEFAULT_GAP_MS, assign_fights, build_fight_sides, fights_table, player_fight_outcomes
 from fnf.telemetry import elims_table, load_table, replay_dirs
@@ -45,6 +46,9 @@ def main() -> None:
     tables["player_fights"] = player_fight_outcomes(elims)
     tables["fight_sides"] = build_fight_sides(
         tables["damage"], tables["teams"], elims, tables["players"], tables["matches"], tables["positions"]
+    )
+    tables["pokes"] = build_pokes(
+        tables["damage"], tables["teams"], elims, tables["players"], tables["positions"], tables["fight_sides"]
     )
 
     problems = []

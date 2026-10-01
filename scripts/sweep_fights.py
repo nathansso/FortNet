@@ -13,8 +13,9 @@ import numpy as np
 import pandas as pd
 
 from fnf import DATA
+from fnf.pokes import build_pokes
 from fnf.fights import (
-    GAP_S, GRACE_S, OVERLAP_TOL_S, POKE_MIN_SHARE, build_fight_sides, engagement_damage, group_fights, recorder_knock_coverage,
+    GAP_S, GRACE_S, OVERLAP_TOL_S, POKE_CONVERT_S, POKE_MINORITY_SHARE, build_fight_sides, engagement_damage, group_fights, recorder_knock_coverage,
 )
 
 P = DATA / "processed"
@@ -86,8 +87,8 @@ def v0_vs_v1(damage, teams, elims, players, matches, fights_v0, fs) -> None:
 
 
 def poke_sweep(fs: pd.DataFrame) -> None:
-    """Poke share by POKE_MIN_SHARE, from the stored fight-level `mutual` and `minority_damage_share`."""
-    print(f"\n== poke rule sweep (current POKE_MIN_SHARE={POKE_MIN_SHARE:g}); shares are % of sides ==")
+    """Poke share by POKE_MINORITY_SHARE, from the stored fight-level `mutual` and `minority_damage_share`."""
+    print(f"\n== poke rule sweep (current POKE_MINORITY_SHARE={POKE_MINORITY_SHARE:g}); shares are % of sides ==")
     f = fs.drop_duplicates("fight_id")
     print(f"fights {len(f):,}; mutual {100 * f['mutual'].mean():.1f}%; "
           f"median distance known for {100 * f['dist_median_m'].notna().mean():.1f}%")
@@ -108,6 +109,27 @@ def poke_sweep(fs: pd.DataFrame) -> None:
               f"{(x['hits_dealt'] + x['hits_taken']).median() / 2:.0f}; median shooter distance {x['dist_median_m'].median():.0f} m")
 
 
+def convert_sweep(damage, teams, elims, players, positions, fs) -> None:
+    """Poke outcome labels by POKE_CONVERT_S. `delayed` excludes conversions during the poke or within GRACE_S of it."""
+    print(f"\n== poke outcome sweep (current POKE_CONVERT_S={POKE_CONVERT_S:g}) ==")
+    rows = {}
+    for conv in (10, 20, 30, 45):
+        pk = build_pokes(damage, teams, elims, players, positions, fs, convert_s=conv)
+        delayed = pk["converted"] & (pk["t_convert"] > GRACE_S)
+        rows[f"conv {conv}s"] = {
+            "pokes": len(pk), "converted %": 100 * pk["converted"].mean(),
+            "by poker %": 100 * (pk["converted_by"] == "poker").mean(),
+            "by third party %": 100 * (pk["converted_by"] == "third_party").mean(),
+            "environment %": 100 * (pk["converted_by"] == "environment").mean(),
+            "delayed (> grace) %": 100 * delayed.mean(), "storm_death": int(pk["storm_death"].sum()),
+            "structure hits>0": int((pk["structure_hits"] > 0).sum()),
+        }
+    print(pd.DataFrame(rows).round(1).to_string())
+    pk = build_pokes(damage, teams, elims, players, positions, fs)
+    print(f"net damage median {pk['net_damage'].median():.0f}; poke fights with an in-poke or grace-window knock "
+          f"{100 * (pk['converted'] & (pk['t_convert'] <= GRACE_S)).mean():.1f}% of pokes")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--skip-grid", action="store_true", help="skip the 48-cell GAP/TOL/GRACE grid (about 2 min)")
@@ -126,6 +148,7 @@ def main() -> None:
         print(fmt.to_string(index=False))
     fs = build_fight_sides(damage, teams, elims, players, matches, positions)
     poke_sweep(fs)
+    convert_sweep(damage, teams, elims, players, positions, fs)
     print(f"\n== v0 vs v1 at defaults (gap {GAP_S:g}, tol {OVERLAP_TOL_S:g}, grace {GRACE_S:g}) ==")
     v0_vs_v1(damage, teams, elims, players, matches, None, fs)
 

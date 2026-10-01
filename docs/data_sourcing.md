@@ -170,6 +170,7 @@ When a new build ships:
 
 | Date | Change |
 |---|---|
+| 2026-10-01 | `fight_sides` and `pokes` tables added (damage-based fights, fight/poke typing, poke outcome labels, `seg_version`). New quality gate `recorder knock coverage` (>= 0.90): 0.972 of 468 recorder-involved opposing-team knocks fall in a fight with an outcome on the 98 local replays. |
 | 2026-10-01 | Manifest introduced and backfilled with 100 `local_demos` client replays. Quality gates added; all pass on 98 exported replays. NPC bots without unique ids get `BOT_<state_player_id>`. |
 | 2026-09-30 | Builder attribution with build-tool signal (95% team-blind accuracy on 1,142 Creative pieces). |
 | 2026-09-27 | C# exporter on FortniteReplayReader 3.1.0. Damage, health, positions and builds validated on local replays. |

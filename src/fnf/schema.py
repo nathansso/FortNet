@@ -262,9 +262,34 @@ _add(Table(
         _c("minority_damage_share", "float",
            desc="Fight-level: second-largest dealing team's share of the fight's total damage (0 if one-sided)"),
         _c("engagement_type", "string",
-           desc="Fight-level: fight | poke. Poke = not mutual, or minority_damage_share < POKE_MIN_SHARE; never dropped"),
+           desc="Fight-level: fight | poke. Poke = not mutual, or minority_damage_share < POKE_MINORITY_SHARE; never dropped"),
         _c("dist_median_m", "float", True, "Fight-level: median shooter-target distance over hits; null if positions unknown", "m"),
         _c("dist_max_m", "float", True, "Fight-level: max shooter-target distance over hits; null if positions unknown", "m"),
+        _c("seg_version", "string", desc="Parameter set that produced this row, e.g. v1-gap10-tol1-grace3-poke10-conv20"),
+    ),
+))
+_add(Table(
+    "pokes", "processed", "data/processed/pokes.parquet", "poke (fight_sides.engagement_type = poke)", ("fight_id",),
+    desc="Outcome labels for pokes (architecture 1.1a, src/fnf/pokes.py). Labels look ahead of the poke by "
+         "POKE_CONVERT_S by design; the poke's own t0, players and type never do.",
+    notes=("v1 thresholds, tuned on local Zero Build pub replays; re-tune on competitive Build data.",),
+    columns=(
+        _c("fight_id", "string"), MATCH_ID,
+        _c("poker_team", "int", desc="Team that dealt the most damage in the poke"),
+        _c("target_team", "int", desc="Team the poker dealt the most damage to"),
+        _c("t0", "float", desc="Poke start (first engagement damage)", unit="s"),
+        _c("t_end", "float", desc="Last engagement damage of the poke", unit="s"),
+        _c("net_damage", "float", desc="Damage the poker dealt to the target team minus damage taken back"),
+        _c("target_players", "string", desc="';'-separated player_ids the poker hit"),
+        _c("converted", "bool", desc="A target player was knocked or eliminated, by anyone, in [t0, t_end + POKE_CONVERT_S]"),
+        _c("converted_by", "string", True, "poker | third_party | environment (storm, fall, self); null if not converted"),
+        _c("converter_team", "int", True, "Team of the eliminator when converted_by is poker or third_party"),
+        _c("t_convert", "float", True, "Seconds from t_end to the first conversion event (negative: during the poke)", "s"),
+        _c("storm_death", "bool", desc="A target player died in the window with in_storm true at their last known flag"),
+        _c("structure_damage", "float",
+           desc="Damage by the poker team to structures within 2 tiles of a target player during the poke"),
+        _c("structure_hits", "int", desc="Number of such structure hits (Build matches only in practice)"),
+        _c("seg_version", "string", desc="Parameter set that produced this row"),
     ),
 ))
 _add(Table(

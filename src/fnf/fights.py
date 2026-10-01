@@ -114,14 +114,25 @@ DIRECT_ELIM_ALL_MODES = False
 """An elimination with no earlier knock of that victim counts as a knock. Always true for solo matches. If False,
 team modes ignore such eliminations (the plan's default); if True they count too (last alive teammate dying)."""
 
-POKE_MIN_SHARE = 0.10
+POKE_MINORITY_SHARE = 0.10
 """A fight is a `poke` if it is not mutual (only one team dealt damage) or the second-largest dealing team
 dealt less than this share of the fight's total damage; otherwise it is a `fight`. Pokes are classified, never
 dropped: zone-edge poking is a skill in its own right. Provisional, swept in scripts/sweep_fights.py."""
 
+POKE_CONVERT_S = 20.0
+"""A poke converted if one of its target players is knocked or eliminated (by anyone) within this many seconds
+after the poke's last damage. Used by fnf.pokes; defined here so `seg_version` can name it."""
+
 HIT_POS_MAX_AGE_S = 2.0
 """A player's position counts for a hit's shooter-target distance only if the last position update is at most this
 old (distant pawns update rarely in client replays)."""
+
+
+def seg_version(gap_s: float = GAP_S, overlap_tol_s: float = OVERLAP_TOL_S, grace_s: float = GRACE_S,
+                poke_minority_share: float = POKE_MINORITY_SHARE, poke_convert_s: float = POKE_CONVERT_S) -> str:
+    """Name of the parameter set that produced a labelled table, e.g. `v1-gap10-tol1-grace3-poke10-conv20`."""
+    return (f"v1-gap{gap_s:g}-tol{overlap_tol_s:g}-grace{grace_s:g}"
+            f"-poke{round(100 * poke_minority_share):g}-conv{poke_convert_s:g}")
 
 
 def team_at(df: pd.DataFrame, player_col: str, time_col: str, teams: pd.DataFrame) -> pd.Series:
@@ -129,6 +140,8 @@ def team_at(df: pd.DataFrame, player_col: str, time_col: str, teams: pd.DataFram
 
     Returns nullable ints aligned to `df.index` (NA where the player has no assignment yet).
     """
+    if df.empty:
+        return pd.Series(pd.array([], dtype="Int64"), index=df.index)
     left = df[["match_id", time_col, player_col]].rename(columns={player_col: "player_id", time_col: "t"})
     left = left.assign(_i=np.arange(len(df))).dropna(subset=["player_id"]).sort_values("t")
     right = teams[["match_id", "player_id", "t", "team_index"]].sort_values("t")
@@ -218,8 +231,11 @@ def outcome_events(elims: pd.DataFrame, teams: pd.DataFrame, solo_matches: set[s
     Columns: match_id, t, eliminator, eliminated, victim_team, killer_team. A not-knocked elimination counts when
     the victim has no earlier knock and the match is solo (or `direct_elim_all_modes`).
     """
+    out_cols = ["match_id", "t", "eliminator", "eliminated", "victim_team", "killer_team"]
+    if elims.empty:
+        return pd.DataFrame({c: [] for c in out_cols})
     e = elims[["match_id", "t_ms", "eliminator", "eliminated", "knocked"]].copy()
-    e = e.astype({"match_id": "object", "eliminator": "object", "eliminated": "object"})
+    e = e.astype({"match_id": "object", "eliminator": "object", "eliminated": "object", "knocked": "bool"})
     e["t"] = e["t_ms"] / 1000
     first_knock = e[e["knocked"]].groupby(["match_id", "eliminated"])["t"].min()
     key = pd.MultiIndex.from_frame(e[["match_id", "eliminated"]])
@@ -231,7 +247,7 @@ def outcome_events(elims: pd.DataFrame, teams: pd.DataFrame, solo_matches: set[s
     e["killer_team"] = team_at(e, "eliminator", "t", teams)
     e = e.dropna(subset=["victim_team", "killer_team"])
     e = e[e["victim_team"] != e["killer_team"]].astype({"victim_team": int, "killer_team": int})
-    return e[["match_id", "t", "eliminator", "eliminated", "victim_team", "killer_team"]].sort_values(
+    return e[out_cols].sort_values(
         ["match_id", "t"], kind="stable").reset_index(drop=True)
 
 
@@ -286,13 +302,14 @@ def build_fight_sides(
     damage: pd.DataFrame, teams: pd.DataFrame, elims: pd.DataFrame, players: pd.DataFrame, matches: pd.DataFrame,
     positions: pd.DataFrame | None = None,
     *, gap_s: float = GAP_S, overlap_tol_s: float = OVERLAP_TOL_S, grace_s: float = GRACE_S, tie_s: float = TIE_S,
-    direct_elim_all_modes: bool = DIRECT_ELIM_ALL_MODES, poke_min_share: float = POKE_MIN_SHARE,
+    direct_elim_all_modes: bool = DIRECT_ELIM_ALL_MODES, poke_minority_share: float = POKE_MINORITY_SHARE,
+    poke_convert_s: float = POKE_CONVERT_S,
 ) -> pd.DataFrame:
     """One row per (fight, team): the `fight_sides` table. See docs/architecture.md 1.1 and the module constants."""
     eng = group_fights(engagement_damage(damage, teams), gap_s, overlap_tol_s)
     cols = ["fight_id", "match_id", "team_index", "opp_team_index", "t0", "t_end", "players", "outcome", "multi_team",
             "n_damage_events", "hits_dealt", "hits_taken", "damage_dealt", "damage_taken", "recorder_involved",
-            "has_bots", "mutual", "minority_damage_share", "engagement_type", "dist_median_m", "dist_max_m"]
+            "has_bots", "mutual", "minority_damage_share", "engagement_type", "dist_median_m", "dist_max_m", "seg_version"]
     if eng.empty:
         return pd.DataFrame({c: [] for c in cols})
 
@@ -327,7 +344,7 @@ def build_fight_sides(
     fights["minority_damage_share"] = pd.Series(second / np.where(total > 0, total, 1), index=dealt.index)
     fights["mutual"] = pd.Series((dealt > 0).sum(axis=1) >= 2, index=dealt.index)
     fights["engagement_type"] = np.where(
-        fights["mutual"] & (fights["minority_damage_share"] >= poke_min_share), "fight", "poke")
+        fights["mutual"] & (fights["minority_damage_share"] >= poke_minority_share), "fight", "poke")
     if positions is not None:
         eng = eng.assign(dist=hit_distances(eng, positions))
         dist = eng.groupby("fight_id")["dist"].agg(dist_median_m="median", dist_max_m="max")
@@ -364,6 +381,7 @@ def build_fight_sides(
     out["multi_team"] = out["n_teams"] > 2
     out["n"] = out["fight_id"].str.rsplit(":", n=1).str[1].astype(int)
     out = out.sort_values(["match_id", "n", "team_index"], kind="stable").reset_index(drop=True)
+    out["seg_version"] = seg_version(gap_s, overlap_tol_s, grace_s, poke_minority_share, poke_convert_s)
     return out[cols]
 
 

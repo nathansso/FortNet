@@ -65,7 +65,7 @@ Validation (builds): in the Sept 12 Creative match, the recorder's new pieces ×
 ## Next steps
 
 0. **Build-mode data.** Record Build BR / ranked matches (and tournament replays where available) to grow the build sample beyond 3 matches. A first hit-to-build latency (time from taking a hit to placing the next piece) is computable now: medians of about 0.25–1.25 s in the Creative matches.
-1. **Stage 1 of [docs/architecture.md](docs/architecture.md):** damage-based fight segmentation, snapshot features at engagement start, snapshot fight models, fights won above expected and latency features.
+1. **Stage 1 of [docs/architecture.md](docs/architecture.md):** damage-based fight segmentation is done (`fight_sides`, `pokes`). Next, 1.2: snapshot features at engagement start (including zone context), snapshot fight models, fights won above expected and latency features.
 2. **Tournament server replays.** Choose a sanctioned source: in-game tournament replay downloads, a data partner (Cito API, Osirion), or research access from Epic. The unofficial Epic replay/event endpoints use a game-client credential and are a terms-of-service risk.
 3. **Results backbone** for the forecaster: per-event placements (Cito API, Liquipedia LPDB for non-commercial use), with ages from Liquipedia and Wikipedia.
 

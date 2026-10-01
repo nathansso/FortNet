@@ -4,7 +4,14 @@ from pathlib import Path
 
 import pandas as pd
 
-TABLES = ["meta", "players", "positions", "damage", "health", "eliminations", "safezones"]
+from fnf.schema import coerce
+
+# Interim CSV name -> schema table used to type it.
+SCHEMA_FOR = {
+    "meta": "matches", "players": "players", "positions": "positions", "damage": "damage", "health": "health",
+    "eliminations": "eliminations", "builds": "builds", "teams": "teams", "weapons": "weapons",
+    "safezones": "safezones", "actor_classes": "actor_classes",
+}
 
 
 def replay_dirs(telemetry_dir: Path) -> list[Path]:
@@ -23,7 +30,8 @@ def load_table(telemetry_dir: Path, name: str) -> pd.DataFrame:
     if not parts:
         return pd.DataFrame()
     df = pd.concat(parts, ignore_index=True)
-    return df[["match_id", *[c for c in df.columns if c != "match_id"]]]
+    df = df[["match_id", *[c for c in df.columns if c != "match_id"]]].assign(match_id=lambda d: d["match_id"].astype("string"))
+    return coerce(df, SCHEMA_FOR[name]) if name in SCHEMA_FOR else df
 
 
 def elims_table(eliminations: pd.DataFrame) -> pd.DataFrame:
@@ -33,7 +41,7 @@ def elims_table(eliminations: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=cols)
     df = eliminations.assign(
         t_ms=(eliminations["t"] * 1000).round().astype("int64"),
-        knocked=eliminations["knocked"].astype(bool),
+        knocked=eliminations["knocked"].fillna(False).astype(bool),
         gun_type=eliminations["gun_type"].astype("string"),
     )
     return df[cols].sort_values(["match_id", "t_ms"], ignore_index=True)

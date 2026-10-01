@@ -159,6 +159,10 @@ public class TelemetryReader() : ReplayReader(null, ParseMode.Full)
         {
             case FortPlayerState state:
                 var id = state.bIsABot == true ? state.BotUniqueId : state.UniqueId ?? state.UniqueID;
+                if (string.IsNullOrEmpty(id) && state.bIsABot == true && ((int?)state.PlayerId ?? state.PlayerID) is int botNumber)
+                {
+                    id = BotId(botNumber);  // named NPC bots have no unique id
+                }
                 if (!string.IsNullOrEmpty(id)) _stateChannelToPlayer[channelIndex] = id;
                 if (state.TeamIndex is int team && _stateChannelToPlayer.GetValueOrDefault(channelIndex) is string teamPlayer)
                 {
@@ -216,6 +220,9 @@ public class TelemetryReader() : ReplayReader(null, ParseMode.Full)
 
         base.OnExportRead(channelIndex, exportGroup);
     }
+
+    /// <summary>Match-scoped id for bots without a unique id; must match players.csv.</summary>
+    public static string BotId(int statePlayerId) => $"BOT_{statePlayerId}";
 
     /// <summary>Player id for a pawn channel, or for a player-state channel directly.</summary>
     private string? PlayerForChannel(uint channel)

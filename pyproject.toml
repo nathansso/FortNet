@@ -9,8 +9,11 @@ dependencies = [
 ]
 
 [project.scripts]
-fnf-import-local = "fnf.import_local:main"
+fnf-import = "fnf.import_replays:main"
 fnf-build-tables = "fnf.build_tables:main"
+fnf-validate = "fnf.schema:validate_processed"
+fnf-schema-doc = "fnf.schema:write_doc"
+fnf-quality = "fnf.quality:main"
 
 [dependency-groups]
 dev = ["pytest>=8"]

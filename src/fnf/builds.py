@@ -120,7 +120,7 @@ def attribute_builders(
         dist = np.full((n, len(players)), np.inf)
         on_team = np.zeros((n, len(players)), bool)
         tool = np.zeros((n, len(players)), bool)
-        piece_team = pc["team_index"].to_numpy() if "team_index" in pc else np.full(n, np.nan)
+        piece_team = pc["team_index"].astype("float64").to_numpy() if "team_index" in pc else np.full(n, np.nan)
         for k, p in enumerate(players):
             w = where[p]
             d = np.sqrt((w["x"].to_numpy() - pc["x"].to_numpy()) ** 2
@@ -128,7 +128,7 @@ def attribute_builders(
                         + (w["z"].to_numpy() - pc["z"].to_numpy()) ** 2)
             dist[:, k] = np.nan_to_num(d, nan=np.inf)
             if p in team_at:
-                on_team[:, k] = team_at[p]["team_index"].to_numpy() == piece_team
+                on_team[:, k] = team_at[p]["team_index"].astype("float64").to_numpy() == piece_team
             if p in tool_at:
                 tool[:, k] = tool_at[p]["tool"].astype("boolean").fillna(False).to_numpy()
 

@@ -1,10 +1,10 @@
 # Architecture: from fights to placement forecasts
 
-Status: plan, agreed 2026-09-30. Stage 1 is the active work. Stages 2 and 3 are designed but gated on data (see "Entry criteria" in each).
+Status: plan, agreed 2026-09-30; data splits added 2026-10-01. Stage 1 is the active work. Stages 2 and 3 are designed but gated on data (see "Entry criteria" in each).
 
 ## Goal
 
-Forecast each pro's placement percentile at the next Major or LAN, using only information from before that event. Then test whether age predicts decline once fight skill, reaction latency, tenure, debut cohort, format era and activity are controlled for. Background and literature: [research/literature_review.md](research/literature_review.md).
+Forecast each pro's placement percentile at the next Major or LAN, using only information from before that event. Then test whether age predicts decline once fight skill, reaction latency, tenure, debut cohort, format era and activity are controlled for. Background and literature: [research/literature_review.md](research/literature_review.md). Data acquisition and schema: [data_sourcing.md](data_sourcing.md), [data_schema.md](data_schema.md).
 
 ## System overview
 
@@ -184,10 +184,55 @@ An encoder over a player's last *N* fights (Stage 2 token sequences or Stage 2 p
 - Trajectory or comparable features improve forecaster NDCG.
 - Gains hold on **held-out players** (players never seen in encoder or forecaster training), not only held-out events.
 
+## Data splits
+
+Implemented in `src/fnf/splits.py` as pure functions of ids and dates, so every session reproduces the same assignment (tests: `tests/test_splits_schema.py`). Changing a fraction or salt is a versioned decision: bump the salt suffix (`-v1` → `-v2`) and add a row to [Decisions](#decisions).
+
+| Split | Unit | Rule | Code |
+|---|---|---|---|
+| Held-out players | `player_id` | 20% of players by salted hash (`fnf-holdout-v1`). Bots never held out | `is_held_out_player` |
+| Fight models | match | Chronological by match start: oldest 70% train, next 15% val, latest 15% test | `chronological_split` |
+| Out-of-fold residuals | match | 5 folds by salted hash of `match_id` (`fnf-folds-v1`) | `cross_fit_fold` |
+| Forecaster | event date | Rolling origin: train on events strictly before the origin date, test on that date's events | `rolling_origins` |
+
+### Held-out players (all stages)
+
+- Excluded from Stage 3 encoder training, forecaster training, and all hyperparameter and feature selection.
+- Their fights *may* be used to train the identity-free fight models (Stages 1–2), because those never see who played. Their residual features must still be out-of-fold (below).
+- Forecaster metrics are reported separately for held-out and seen players. A large gap means the model is memorizing players.
+
+### Fight models (Stages 1–2)
+
+- Whole matches go to one split. Match start is `utc_start`, falling back to the replay file-name timestamp (local time) when missing.
+- Once tournament data exists, split by **session** (all matches of one tournament session together), since a session's matches share players and conditions. Then add a `session_id` grouping to `chronological_split`.
+- The test split is touched only for numbers that get reported. Tuning uses val.
+- Also report on the most recent season alone, to catch patch drift.
+- **Pretrain / fine-tune (Stage 2):** pretrain on all lobby tiers in the train period. Fine-tune on competitive matches in the train period. Val and test metrics are reported on competitive matches; pub val is diagnostic only.
+
+### Out-of-fold residuals (FWAE, WPA, latency vs. expected)
+
+A fight's residual must come from a fight model that didn't train on that fight's match. Otherwise the model has partly memorized the outcome, and residuals shrink toward zero unevenly.
+- Within a training window, assign matches to 5 folds (`cross_fit_fold`), train on four, and score the fifth.
+- For forecasting event *E*, the fight model is trained only on fights before *E*. Retraining at every origin is expensive, so retrain at monthly checkpoints. Features for *E* use the latest checkpoint whose training data ends before *E*'s date.
+
+### Forecaster
+
+- Expanding-window rolling origin. The minimum history before the first origin is set when the results backbone lands (default 10 events).
+- Events on the origin date are never in training, since same-day sessions share information.
+- Origins are divided once into a **dev period** (model and feature selection) and a **final test period** (the latest 25% of origins, reported once). The boundary date is fixed and recorded in Decisions when the results backbone lands.
+- The held-out-player rule applies on top.
+
+### Required leakage tests
+
+Each feature builder or model that takes a cutoff gets a test in `tests/` showing that:
+- changing or deleting data after the cutoff (fight `t0`, or event date) leaves its output unchanged;
+- encoder and forecaster training sets contain no held-out players;
+- split functions are deterministic (already covered).
+
 ## Evaluation protocol
 
-- **Rolling-origin by event date:** train on everything before event *E*, predict *E*, then advance. No random splits anywhere.
-- **Held-out players:** a fixed 20% of pros excluded from all training, evaluated separately. This catches "embedding as a disguised player ID".
+- Splits as defined in [Data splits](#data-splits). No random splits anywhere.
+- **Held-out players** are reported separately. This catches "embedding as a disguised player ID".
 - **Fight models:** log loss, Brier, reliability curves, by season.
 - **Forecaster:** NDCG@10 and @25, Spearman, log loss on top-k finish, with block bootstrap confidence intervals over events.
 - **Gate rule:** a stage or feature is adopted only if it beats the current baseline on these, with the CI excluding 0.
@@ -201,15 +246,19 @@ An encoder over a player's last *N* fights (Stage 2 token sequences or Stage 2 p
 | 2026-09-30 | Embeddings enter the forecaster through a dimension sweep (0/2/4/8/16/64), comparing PCA with supervised reduction | A raw 64-d vector over a few hundred players risks acting as a disguised player ID. PCA may drop low-variance but predictive directions (e.g. latency drift) |
 | 2026-09-30 | Fight model may train on all lobbies; player features and forecaster use pros only | "Which situation wins" doesn't need pro data |
 | 2026-09-30 | Builder attribution: team at spawn → holding build tool (new pieces) → nearest | 95% team-blind accuracy on 1,142 labeled pieces (see README) |
+| 2026-10-01 | Splits v1: 20% player holdout (`fnf-holdout-v1`), chronological 70/15/15 by match for fight models, 5-fold out-of-fold residuals (`fnf-folds-v1`), rolling origin by event date for the forecaster | Deterministic and reproducible across sessions. Out-of-fold residuals keep fight-skill features from being shrunk by memorization |
+| 2026-10-01 | Fight-model splits move from match to tournament session once tournament data exists | Matches in one session share players and conditions |
 
 ## Open questions
 
 - Do tournament server replays fill in piece `OwnerPersistentID` / `EditingPlayer`? If so, they replace inferred builders.
-- What's the sanctioned source for tournament server replays at scale? (README, Next steps.)
+- What's the sanctioned source for tournament server replays at scale? See [data_sourcing.md](data_sourcing.md), section 2.
 - What's the right outcome label for fights that end in disengagement: exclude, a third class, or net damage?
 - How should duo/trio credit be split: by damage share or by Stage 2 WPA?
 
 ## Planned code layout
+
+Existing: `schema.py` (all table schemas), `splits.py`, `quality.py`, `import_replays.py`, `telemetry.py`, `builds.py`, `build_tables.py`.
 
 ```
 src/fnf/

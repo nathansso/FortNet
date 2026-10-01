@@ -74,7 +74,7 @@ static void Export(FortniteReplay replay, TelemetryReader reader, string dir)
          "state_player_id", "world_player_id",
          "platform", "death_time", "death_cause", "death_x", "death_y", "death_z"],
         players.Select(p => new object?[] {
-            p.PlayerId, p.PlayerName, p.IsBot, p.TeamIndex, p.Placement, p.Kills, p.TeamKills, p.IsReplayOwner,
+            p.PlayerId ?? (p.IsBot && p.Id is int botNumber ? TelemetryReader.BotId(botNumber) : null), p.PlayerName, p.IsBot, p.TeamIndex, p.Placement, p.Kills, p.TeamKills, p.IsReplayOwner,
             p.Id, p.PlayerNumber,
             p.Platform, p.DeathTimeDouble ?? p.DeathTime, p.DeathCause, p.DeathLocation?.X, p.DeathLocation?.Y, p.DeathLocation?.Z }));
 

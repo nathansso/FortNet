@@ -4,7 +4,7 @@ Forecast pro Fortnite players' placements at Majors and LANs from their history,
 
 Fight-level modeling comes first. It uses a model of who wins each fight, trained on replay telemetry, to produce per-player "fights won above expected" and reaction-latency features (perception-action cycle latency). Those features then feed the event-level forecaster.
 
-The modeling plan (three fight-model stages, the forecaster, leakage rules, evaluation gates and decisions) is in [docs/architecture.md](docs/architecture.md). Background research lives in [docs/research/literature_review.md](docs/research/literature_review.md), with source notes in `docs/research/notes/`.
+The modeling plan (three fight-model stages, the forecaster, leakage rules, data splits, evaluation gates and decisions) is in [docs/architecture.md](docs/architecture.md). Background research lives in [docs/research/literature_review.md](docs/research/literature_review.md), with source notes in `docs/research/notes/`.
 
 ## Setup
 
@@ -18,18 +18,22 @@ dotnet build ingest/ReplayExport -c Release
 ## Pipeline
 
 ```
-Fortnite Demos folder (.replay)
-  -> fnf-import-local                 copy into data/raw/replays
+replay folder (.replay)
+  -> fnf-import                       copy into data/raw/replays + provenance in data/raw/manifest.csv
   -> ingest/ReplayExport (C#)         per-replay CSVs -> data/interim/telemetry/<replay>/
-  -> fnf-build-tables                 -> data/processed/*.parquet
+  -> fnf-build-tables                 typed, schema-validated -> data/processed/*.parquet
+  -> fnf-validate, fnf-quality        schema check + quality gates
 ```
 
 ```bash
-uv run fnf-import-local
+uv run fnf-import
 dotnet run --project ingest/ReplayExport -c Release --no-build
 uv run fnf-build-tables
+uv run fnf-validate && uv run fnf-quality
 uv run pytest
 ```
+
+Sources, the full ingest procedure and quality gates are in [docs/data_sourcing.md](docs/data_sourcing.md). Every table and column is in [docs/data_schema.md](docs/data_schema.md), generated from `src/fnf/schema.py` (`uv run fnf-schema-doc`).
 
 `ReplayExport` skips replays already exported; pass `--force` to redo them. It takes about 0.5 s per replay.
 
@@ -47,19 +51,7 @@ Validation (builds): in the Sept 12 Creative match, the recorder's new pieces ×
 
 ### Tables (`data/processed/`)
 
-| table | grain | notes |
-|---|---|---|
-| `matches` | replay | build, session id, playlist, team size, replay owner, recorder's end-of-match stats (`rec_*`) |
-| `players` | match x player | id, name, team, placement, kills, death time/cause/location |
-| `positions` | pawn update | `t` (s), x/y/z, yaw/pitch, velocity, downed/storm/ADS/crouch/sprint/jump/skydive flags |
-| `damage` | damage event | `t`, `source` player, `target` player (null = non-player hit, e.g. structures), `magnitude`, fatal/critical/shield flags, hit location |
-| `health` | health/shield change | recorder only in client replays |
-| `safezones` | storm phase | shrink start/finish times, radius, next center |
-| `weapons` | held-item change | player, item GUID and class (e.g. `DefaultBuildingTool_C`, weapons, pickaxe) |
-| `teams` | team assignment | player team over time (Creative modes reshuffle teams between rounds) |
-| `pieces` | build piece | material, `kind` (wall/floor/stair/cone), `shape`, grid x/y/z + yaw, spawn/close time, team, min health; `is_edit`/`is_reset` (shape change in the same cell); `builder` + `builder_source` (see below) |
-| `elims` | knock/elim | kill feed with `fight_id` (v0 segmentation) |
-| `fights`, `player_fights` | fight, fight x player | v0 fights from the kill feed; `lost` = knocked or eliminated |
+`matches`, `players`, `positions`, `damage`, `health`, `teams`, `weapons`, `safezones`, `pieces` (builds, edits, inferred builder), `elims`, `fights` / `player_fights` (kill-feed v0). Columns, types, units and caveats: [docs/data_schema.md](docs/data_schema.md).
 
 ## Current limitations
 

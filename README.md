@@ -53,7 +53,7 @@ Validation (builds): in the Sept 12 Creative match, the recorder's new pieces ×
 
 ### Tables (`data/processed/`)
 
-`matches`, `players`, `positions`, `damage`, `health`, `teams`, `weapons`, `safezones`, `pieces` (builds, edits, inferred builder), `elims`, `fights` / `player_fights` (kill-feed v0). Columns, types, units and caveats: [docs/data_schema.md](docs/data_schema.md).
+`matches`, `players`, `positions`, `damage`, `health`, `teams`, `weapons`, `safezones`, `pieces` (builds, edits, inferred builder), `elims` (the kill feed), `fight_sides` (damage-based fights per team, with fight / pick / poke typing and outcomes) and `pokes` (poke outcome labels). Columns, types, units and caveats: [docs/data_schema.md](docs/data_schema.md).
 
 ## Current limitations
 
@@ -61,7 +61,7 @@ Validation (builds): in the Sept 12 Creative match, the recorder's new pieces ×
 - **Only 3 local replays have real building**, all small Creative matches. Zero Build matches also contain some brick and metal pieces placed mid-match (archways, door walls, floors); they look item-deployed and should be filtered or modeled separately.
 - **Builder is inferred.** Pieces carry `OwnerPersistentID` and `EditingPlayer` fields, but client replays never fill them in. The rule: candidates are the piece's team at spawn time. For new pieces, a candidate holding `DefaultBuildingTool_C` (from `weapons.csv`) wins. Otherwise, and for all edits (editing doesn't change the held item), the nearest candidate wins. `builder_source` records which step decided it. Tested with team hidden against 1,142 Creative pieces whose builder is known (team of one): 95% correct overall, 89% where 2+ players were within ~2 tiles (vs 89% / 67% for nearest-only). In real duos and trios, team narrows the choice to 2–3 players, so accuracy should be at least that. Whether tournament server replays fill in the owner fields is untested.
 - Elimination event locations decode incorrectly on this build (values near 0). Use `positions` at the event time instead.
-- Fight v0 is based only on the kill feed. Replace it with damage-based segmentation, since `damage` now has source and target.
+- Fights are segmented from damage, which only exists for what the recorder saw: lobby-wide fights outside its view range are missing (only about 42% of the old kill-feed fights with a knock have a matching damage fight). Segmentation thresholds are v1 values tuned on Zero Build pubs and will be re-tuned on competitive Build data.
 - Two replays fail with "encrypted but not completed". These are recordings that were never finalized.
 
 ## Next steps

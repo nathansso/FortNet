@@ -241,7 +241,6 @@ NetMulticast_Athena_BatchedDamageCues, called on the instigator's pawn.
 | `eliminated` | string | yes |  |  |
 | `knocked` | bool |  |  |  |
 | `gun_type` | string | yes |  |  |
-| `fight_id` | string |  |  | Kill-feed fight v0 |
 
 ### `pieces`
 
@@ -316,36 +315,6 @@ Deduplicated pieces with edits and inferred builder (fnf.builds).
 | `next_radius` | float |  | uu |  |
 | `next_x` | float | yes | uu |  |
 | `next_y` | float | yes | uu |  |
-
-### `fights`
-
-`data/processed/fights.parquet`. Grain: fight (kill-feed v0). Key: `fight_id`.
-
-| column | type | null | unit | description |
-|---|---|---|---|---|
-| `fight_id` | string |  |  |  |
-| `match_id` | string |  |  | Replay file stem |
-| `t_start_ms` | int |  | ms |  |
-| `t_end_ms` | int |  | ms |  |
-| `n_events` | int |  |  |  |
-| `n_knocks` | int |  |  |  |
-| `n_elims` | int |  |  |  |
-| `duration_ms` | int |  | ms |  |
-| `n_players` | int |  |  |  |
-
-### `player_fights`
-
-`data/processed/player_fights.parquet`. Grain: fight x player. Key: `fight_id, player`.
-
-| column | type | null | unit | description |
-|---|---|---|---|---|
-| `fight_id` | string |  |  |  |
-| `player` | string |  |  |  |
-| `knocks_dealt` | int |  |  |  |
-| `knocks_recv` | int |  |  |  |
-| `elims_dealt` | int |  |  |  |
-| `elims_recv` | int |  |  |  |
-| `lost` | bool |  |  |  |
 
 ### `fight_sides`
 

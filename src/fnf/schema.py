@@ -185,7 +185,7 @@ _add(Table(
 _add(Table(
     "elims", "processed", "data/processed/elims.parquet", "knock or elimination", (),
     columns=(MATCH_ID, _c("t_ms", "int", unit="ms"), _c("eliminator", "string", True), _c("eliminated", "string", True),
-             _c("knocked", "bool"), _c("gun_type", "string", True), _c("fight_id", "string", desc="Kill-feed fight v0")),
+             _c("knocked", "bool"), _c("gun_type", "string", True)),
 ))
 _add(Table(
     "builds", "interim", "data/interim/telemetry/<match_id>/builds.csv", "piece actor spawn", (),
@@ -224,17 +224,6 @@ _add(Table(
     "actor_classes", "interim", "data/interim/telemetry/<match_id>/actor_classes.csv", "actor class", ("path",),
     desc="Spawn count per actor class; use it to find new PBWA_* shapes (ingest/gen_build_pieces.py).",
     columns=(_c("path", "string"), _c("spawns", "int")),
-))
-_add(Table(
-    "fights", "processed", "data/processed/fights.parquet", "fight (kill-feed v0)", ("fight_id",),
-    columns=(_c("fight_id", "string"), MATCH_ID, _c("t_start_ms", "int", unit="ms"), _c("t_end_ms", "int", unit="ms"),
-             _c("n_events", "int"), _c("n_knocks", "int"), _c("n_elims", "int"), _c("duration_ms", "int", unit="ms"),
-             _c("n_players", "int")),
-))
-_add(Table(
-    "player_fights", "processed", "data/processed/player_fights.parquet", "fight x player", ("fight_id", "player"),
-    columns=(_c("fight_id", "string"), _c("player", "string"), _c("knocks_dealt", "int"), _c("knocks_recv", "int"),
-             _c("elims_dealt", "int"), _c("elims_recv", "int"), _c("lost", "bool")),
 ))
 
 # ---------------------------------------------------------------- planned (Stage 1 and results backbone)

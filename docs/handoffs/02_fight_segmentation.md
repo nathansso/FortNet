@@ -2,13 +2,15 @@
 
 Branch: `stage1/fight-segmentation` (from `main`). Written 2026-10-01.
 
+> **Status (2026-10-01):** done and extended. The kill-feed v0 tables (`fights`, `player_fights`, `elims.fight_id`) were retired in a separate commit; v0 appears below only as the starting point. Beyond this plan the user added the three-way engagement type (fight / pick / poke), the `pokes` outcome table and `seg_version`: see docs/architecture.md 1.1 and 1.1a. The v0-vs-v1 comparison in Phase 4.3 (41.9% of 2,766 v0 fights with a knock matched a v1 fight; 1,584 of the misses had no recorded damage) can no longer be rerun from code.
+
 ## Prompt to start the session
 
 > You're picking up Stage 1.1, fight segmentation, for the Fortnite placement forecasting project in this repo. Read `CLAUDE.md`, then `docs/handoffs/02_fight_segmentation.md` (your plan), section "Stage 1" and "Data splits" of `docs/architecture.md`, and the `damage`, `teams`, `elims`, `positions`, `players` and `matches` tables in `docs/data_schema.md`. Work on branch `stage1/fight-segmentation`. If you're in a git worktree, set `FNF_DATA_DIR` as described in CLAUDE.md so you use the shared data. Follow the plan phase by phase: explore before implementing, and stop at the visual-check step in Phase 4 so I can review example fights. Report at the end of each phase with numbers, what changed, and what's next.
 
 ## Context
 
-Stage 1 predicts who wins a fight from the situation at its start, and turns actual-minus-expected into a skill feature (architecture 1.1–1.4). Everything downstream depends on a clean definition of a fight, its participants, its start time `t0` and its outcome. The current `fights` / `player_fights` tables are a kill-feed v0 that only sees fights with a knock and has no teams. This handoff replaces it with damage-based segmentation and produces the planned `fight_sides` table.
+Stage 1 predicts who wins a fight from the situation at its start, and turns actual-minus-expected into a skill feature (architecture 1.1–1.4). Everything downstream depends on a clean definition of a fight, its participants, its start time `t0` and its outcome. The original `fights` / `player_fights` tables were a kill-feed v0 that only saw fights with a knock and had no teams (since retired). This handoff replaces it with damage-based segmentation and produces the planned `fight_sides` table.
 
 ## Goal
 
@@ -41,7 +43,7 @@ Implement `fights.py` v1: segment fights from player-to-player damage between te
 
 ### Phase 0: orient
 
-Read the docs in the prompt. Run the pipeline end to end (CLAUDE.md commands), then `uv run fnf-quality`. Read `src/fnf/fights.py` (v0), `src/fnf/builds.py` (it has `merge_asof`-by-player patterns you can reuse) and `src/fnf/splits.py`.
+Read the docs in the prompt. Run the pipeline end to end (CLAUDE.md commands), then `uv run fnf-quality`. Read `src/fnf/fights.py` (v0 at the time of writing; now replaced by v1), `src/fnf/builds.py` (it has `merge_asof`-by-player patterns you can reuse) and `src/fnf/splits.py`.
 
 ### Phase 1: explore (a script, not library code)
 
@@ -55,7 +57,7 @@ Report the answers before Phase 2.
 
 ### Phase 2: implement `src/fnf/fights.py` v1
 
-Keep v0 in place for now; rename its public functions with a `killfeed_` prefix only if it simplifies things, and update callers. Add v1 functions. Make every parameter a module constant with a docstring explaining it, and a keyword argument.
+Keep v0 in place for now (it was later retired); add v1 functions. Make every parameter a module constant with a docstring explaining it, and a keyword argument.
 
 1. **Engagement damage:** `target` and `source` not null, `source != target`, `magnitude > 0`. Attach `source_team` and `target_team` (team at `t`, by `merge_asof` per player per match). Drop rows with an unknown team or friendly fire.
 2. **Team-pair segments:** for each match and unordered team pair, sort by `t` and start a new segment when the gap exceeds `GAP_S` (start with 10 s and tune in Phase 4).
@@ -76,7 +78,7 @@ Keep v0 in place for now; rename its public functions with a `killfeed_` prefix 
 
 - Update the planned `fight_sides` table in `src/fnf/schema.py` to match what you built: add the Phase 2 step 6 columns, set `status="built"` and document each column. Run `uv run fnf-schema-doc`.
 - Wire it into `src/fnf/build_tables.py`. It must pass `schema.validate`.
-- Keep producing v0 `fights` / `player_fights` until the user agrees to retire them, then remove them in a separate commit.
+- Keep producing v0 `fights` / `player_fights` until the user agrees to retire them, then remove them in a separate commit (done).
 - Add a gate to `src/fnf/quality.py`: the share of recorder-involved opposing-team knocks that fall inside a v1 fight with a non-`disengage` outcome. Set its threshold from Phase 4 results; ≥ 90% is the target.
 
 ### Phase 4: tune and check

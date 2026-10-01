@@ -60,7 +60,7 @@ Replays contain account IDs and display names, and many pros are minors. `data/`
 
 ## Stage 1: snapshot fight model and FWAE
 
-### 1.1 Fight segmentation (replaces kill-feed v0)
+### 1.1 Fight segmentation
 
 Source: the `damage`, `positions`, `teams`, `elims` and `players` tables. Implementation: `src/fnf/fights.py` v1 (handoff 02). All thresholds are v1 values, subject to [relabeling](#label-calibration-and-relabeling).
 
@@ -291,6 +291,7 @@ Each feature builder or model that takes a cutoff gets a test in `tests/` showin
 | 2026-10-01 | Fight-model splits move from match to tournament session once tournament data exists | Matches in one session share players and conditions |
 | 2026-10-01 | Fights merge only on true time overlap (tolerance swept 0–3 s), not gap proximity | Gap-proximity merging made 38% of fights multi-team and chained unrelated back-to-back fights |
 | 2026-10-01 | v1 parameters: `GAP_S` 10 (provisional; to be decided on competitive Build data, no post-knock split rule for now), `OVERLAP_TOL_S` 1, `GRACE_S` 3, `TIE_S` 1, `POKE_MINORITY_SHARE` 0.10, `POKE_CONVERT_S` 20 | Sweep of 48 GAP/tol/grace cells on 98 replays: recorder-knock coverage 95.7-98.5% everywhere (grace moves it 0.2 pt per step), so fight shape decides. At 10/1/3: 3,217 fights, 20.6% multi-team, 949 labelled two-team fights, p90 duration 18 s. `GAP_S` 5 gives 4,343 fights, 1,126 labelled, p90 9.8 s but splits 745 fights (413 two-team) of the gap-10 set. Engagement type (`seg_version` v2) at 0.10: 3,217 fights = 40.8% fight, 15.5% pick, 43.7% poke; of 1,371 decided fights, 872 are fights and 499 picks. Poke conversion after the grace window: 7.2% within 20 s (3.9% by the poker, 3.3% by a third party), 3.2% / 11.3% / 16.2% at 10 / 30 / 45 s |
+| 2026-10-01 | Kill-feed v0 tables (`fights`, `player_fights`, `elims.fight_id`) retired. `fight_sides` replaces them | v0 saw only fights with a knock and had no teams; only 41.9% of its 2,766 knock fights match a v1 fight (the misses had no recorded damage, i.e. outside the recorder's view). Lobby-wide kill-feed counts, including knocks outside the recorder's view range, can still be recomputed from `elims` if ever needed |
 | 2026-10-01 | Pokes are a separate engagement type with their own outcomes (conversion, storm death, net damage, structure pressure) and skill measure (PVAE), plus zone and rotation context | Zone-edge poking of late rotators is a core competitive skill; counting pokes as failed fights would lose it |
 | 2026-10-01 | All segmentation and poke thresholds are v1 (tuned on local Zero Build pub replays) and must be re-tuned and relabeled on competitive Build data before training models for pro features; tables carry `seg_version` | Build mode and competitive tempo change damage, gap and poke distributions |
 
@@ -311,7 +312,8 @@ Existing: `schema.py` (all table schemas), `splits.py`, `quality.py`, `import_re
 
 ```
 src/fnf/
-  fights.py            # 1.1 segmentation v1 (replaces kill-feed v0)
+  fights.py            # 1.1 damage-based segmentation -> fight_sides (kill-feed v0 retired)
+  pokes.py             # 1.1a poke outcome labels -> pokes
   snapshot.py          # 1.2 features at t0
   models/fight_snapshot.py   # 1.3 logistic / LightGBM / set-model net
   features/fwae.py     # 1.4

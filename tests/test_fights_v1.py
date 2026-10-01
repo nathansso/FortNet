@@ -159,9 +159,46 @@ def test_poke_classification():
     assert (sides(fifteen, poke_minority_share=0.2)["engagement_type"] == "poke").all()
 
 
-def test_poke_with_a_knock_keeps_its_outcome():
+def test_pick_is_one_sided_with_a_knock_and_keeps_win_loss():
     fs = sides(dmg([(0.0, "A1", "B1", 100)]), elim([(0.5, "A1", "B1", True)]))
-    assert (fs["engagement_type"] == "poke").all() and outcome(fs, f"{M}:0", 1) == "win"
+    assert (fs["engagement_type"] == "pick").all() and not fs["mutual"].any()
+    assert outcome(fs, f"{M}:0", 1) == "win" and outcome(fs, f"{M}:0", 2) == "loss"
+
+
+def test_knock_inside_grace_after_last_hit_makes_a_pick_and_after_grace_a_poke():
+    d = dmg([(0.0, "A1", "B1", 40), (1.0, "A1", "B1", 40)])
+    assert (sides(d, elim([(1.0 + GRACE_S - 0.1, "A1", "B1", True)]))["engagement_type"] == "pick").all()
+    assert (sides(d, elim([(1.0 + GRACE_S + 0.1, "A1", "B1", True)]))["engagement_type"] == "poke").all()
+
+
+def test_knock_by_a_third_party_outside_the_engagement_does_not_make_a_pick():
+    fs = sides(dmg([(0.0, "A1", "B1", 40), (1.0, "A1", "B1", 40)]), elim([(1.5, "C1", "B1", True)]))
+    assert (fs["engagement_type"] == "poke").all() and set(fs["outcome"]) == {"disengage"}
+
+
+def test_mutual_fight_with_or_without_a_knock_stays_a_fight():
+    assert (sides(dmg(EXCHANGE), elim([(2.5, "A1", "B1", True)]))["engagement_type"] == "fight").all()
+    assert (sides(dmg(EXCHANGE))["engagement_type"] == "fight").all()
+
+
+def test_three_way_shares_partition_the_fights():
+    d = pd.concat([dmg(EXCHANGE), dmg([(100.0, "A1", "C1", 50)]), dmg([(200.0, "A1", "B1", 50)])], ignore_index=True)
+    e = elim([(2.5, "A1", "B1", True), (200.5, "A1", "B1", True)])
+    fs = sides(d, e).drop_duplicates("fight_id")
+    assert sorted(fs["engagement_type"]) == ["fight", "pick", "poke"]
+
+
+def test_label_only_columns_cannot_be_features():
+    from fnf.fights import LABEL_ONLY_COLUMNS, assert_no_label_features
+    assert "engagement_type" in LABEL_ONLY_COLUMNS and "outcome" in LABEL_ONLY_COLUMNS
+    assert_no_label_features(["t0", "match_id"])
+    for col in ("engagement_type", "outcome", "mutual", "damage_dealt"):
+        try:
+            assert_no_label_features(["t0", col])
+        except ValueError:
+            continue
+        raise AssertionError(f"{col} should be rejected")
+    assert set(LABEL_ONLY_COLUMNS) <= set(sides(dmg(EXCHANGE)).columns)
 
 
 def test_hit_distance_from_positions():
@@ -184,8 +221,8 @@ def test_stale_position_gives_no_distance():
 
 
 def test_seg_version_names_the_parameter_set():
-    assert seg_version() == "v1-gap10-tol1-grace3-poke10-conv20"
-    assert seg_version(5, 0, 1, 0.2, 30) == "v1-gap5-tol0-grace1-poke20-conv30"
+    assert seg_version() == "v2-gap10-tol1-grace3-poke10-conv20"
+    assert seg_version(5, 0, 1, 0.2, 30) == "v2-gap5-tol0-grace1-poke20-conv30"
     assert (sides(dmg(EXCHANGE), gap_s=5)["seg_version"] == seg_version(gap_s=5)).all()
 
 

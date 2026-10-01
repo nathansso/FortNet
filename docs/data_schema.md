@@ -373,16 +373,16 @@ Damage-based fights (architecture 1.1, src/fnf/fights.py): player-to-player dama
 | `has_bots` | bool |  |  | Any engaged player in the fight (any side) is a bot |
 | `mutual` | bool |  |  | Fight-level: at least two teams dealt player damage |
 | `minority_damage_share` | float |  |  | Fight-level: second-largest dealing team's share of the fight's total damage (0 if one-sided) |
-| `engagement_type` | string |  |  | Fight-level: fight \| poke. Poke = not mutual, or minority_damage_share < POKE_MINORITY_SHARE; never dropped |
+| `engagement_type` | string |  |  | Fight-level: fight \| pick \| poke. fight = mutual with minority share >= POKE_MINORITY_SHARE; pick = one-sided with a knock in [t0, t_end + GRACE_S]; poke = one-sided, no knock. LABEL-ONLY: decided by what happens during and after the engagement, never a model or t0-feature input (fights.LABEL_ONLY_COLUMNS) |
 | `dist_median_m` | float | yes | m | Fight-level: median shooter-target distance over hits; null if positions unknown |
 | `dist_max_m` | float | yes | m | Fight-level: max shooter-target distance over hits; null if positions unknown |
-| `seg_version` | string |  |  | Parameter set that produced this row, e.g. v1-gap10-tol1-grace3-poke10-conv20 |
+| `seg_version` | string |  |  | Parameter set that produced this row, e.g. v2-gap10-tol1-grace3-poke10-conv20 |
 
 ### `pokes`
 
 `data/processed/pokes.parquet`. Grain: poke (fight_sides.engagement_type = poke). Key: `fight_id`.
 
-Outcome labels for pokes (architecture 1.1a, src/fnf/pokes.py). Labels look ahead of the poke by POKE_CONVERT_S by design; the poke's own t0, players and type never do.
+Outcome labels for pokes (architecture 1.1a, src/fnf/pokes.py). Labels look ahead of the poke by POKE_CONVERT_S by design; the poke's own t0 and players never do, and its type uses data only up to t_end + GRACE_S.
 
 > v1 thresholds, tuned on local Zero Build pub replays; re-tune on competitive Build data.
 
@@ -396,10 +396,10 @@ Outcome labels for pokes (architecture 1.1a, src/fnf/pokes.py). Labels look ahea
 | `t_end` | float |  | s | Last engagement damage of the poke |
 | `net_damage` | float |  |  | Damage the poker dealt to the target team minus damage taken back |
 | `target_players` | string |  |  | ';'-separated player_ids the poker hit |
-| `converted` | bool |  |  | A target player was knocked or eliminated, by anyone, in [t0, t_end + POKE_CONVERT_S] |
+| `converted` | bool |  |  | A target player was knocked or eliminated, by anyone, in (t_end + GRACE_S, t_end + POKE_CONVERT_S] |
 | `converted_by` | string | yes |  | poker \| third_party \| environment (storm, fall, self); null if not converted |
 | `converter_team` | int | yes |  | Team of the eliminator when converted_by is poker or third_party |
-| `t_convert` | float | yes | s | Seconds from t_end to the first conversion event (negative: during the poke) |
+| `t_convert` | float | yes | s | Seconds from t_end to the first conversion event (always > GRACE_S) |
 | `storm_death` | bool |  |  | A target player died in the window with in_storm true at their last known flag |
 | `structure_damage` | float |  |  | Damage by the poker team to structures within 2 tiles of a target player during the poke |
 | `structure_hits` | int |  |  | Number of such structure hits (Build matches only in practice) |

@@ -89,10 +89,19 @@ def test_environment_conversion_when_victim_is_own_eliminator():
     assert r["converted"] and r["converted_by"] == "environment" and pd.isna(r["converter_team"])
 
 
-def test_conversion_during_the_poke_has_negative_t_convert():
-    # a knock between t0 and t_end counts as converted; t_convert < 0 lets users separate direct kills from delayed ones
-    _, pk = run(dmg(POKE), elim([(1.5, "A1", "B1", True)]))
-    assert pk["converted"].iloc[0] and pk["t_convert"].iloc[0] == pytest.approx(-0.5)
+def test_knock_during_or_within_grace_makes_a_pick_not_a_poke():
+    for t in (1.5, 2.0 + GRACE_S - 0.1):
+        fs, pk = run(dmg(POKE), elim([(t, "A1", "B1", True)]))
+        assert (fs["engagement_type"] == "pick").all() and pk.empty
+
+
+def test_conversion_counts_only_after_the_grace_window():
+    _, just_after = run(dmg(POKE), elim([(2.0 + GRACE_S + 0.1, "C1", "B1", True)]))
+    assert just_after["converted"].iloc[0] and just_after["t_convert"].iloc[0] > GRACE_S
+    # a third-party knock of the target DURING the poke is not an opposing fight-team knock (still a poke) but it
+    # sits inside the engagement window, so it is not a conversion either
+    fs, during = run(dmg(POKE), elim([(1.0, "C1", "B1", True)]))
+    assert (fs["engagement_type"] == "poke").all() and not during["converted"].iloc[0]
 
 
 def test_storm_death_requires_in_storm_flag_at_death():

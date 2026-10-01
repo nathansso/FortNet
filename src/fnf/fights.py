@@ -115,13 +115,29 @@ DIRECT_ELIM_ALL_MODES = False
 team modes ignore such eliminations (the plan's default); if True they count too (last alive teammate dying)."""
 
 POKE_MINORITY_SHARE = 0.10
-"""A fight is a `poke` if it is not mutual (only one team dealt damage) or the second-largest dealing team
-dealt less than this share of the fight's total damage; otherwise it is a `fight`. Pokes are classified, never
-dropped: zone-edge poking is a skill in its own right. Provisional, swept in scripts/sweep_fights.py."""
+"""An engagement is one-sided if it is not mutual (only one team dealt damage) or the second-largest dealing team
+dealt less than this share of the total damage; otherwise it is a `fight`. A one-sided engagement is a `pick` if an
+opposing member is knocked or eliminated in [t0, t_end + GRACE_S] (ambush, snipe) and a `poke` if not (zone
+pressure). Nothing is dropped. Provisional, swept in scripts/sweep_fights.py."""
+
+LABEL_ONLY_COLUMNS = (
+    "t_end", "outcome", "engagement_type", "mutual", "minority_damage_share", "n_damage_events", "hits_dealt",
+    "hits_taken", "damage_dealt", "damage_taken", "dist_median_m", "dist_max_m",
+)
+"""`fight_sides` columns decided by what happens during or after the engagement. `engagement_type` in particular
+depends on the outcome, so none of these may be an input to the fight model or any t0 snapshot feature. They may
+only split labels and evaluation. Use `assert_no_label_features` in feature builders."""
+
+
+def assert_no_label_features(columns) -> None:
+    """Raise if any column listed in LABEL_ONLY_COLUMNS is used as a model or t0-snapshot input."""
+    bad = sorted(set(columns) & set(LABEL_ONLY_COLUMNS))
+    if bad:
+        raise ValueError(f"label-only columns used as features (leakage): {bad}")
 
 POKE_CONVERT_S = 20.0
-"""A poke converted if one of its target players is knocked or eliminated (by anyone) within this many seconds
-after the poke's last damage. Used by fnf.pokes; defined here so `seg_version` can name it."""
+"""A poke converted if one of its target players is knocked or eliminated (by anyone) after the grace window and
+within this many seconds after the poke's last damage. Used by fnf.pokes; defined here so `seg_version` names it."""
 
 HIT_POS_MAX_AGE_S = 2.0
 """A player's position counts for a hit's shooter-target distance only if the last position update is at most this
@@ -130,8 +146,9 @@ old (distant pawns update rarely in client replays)."""
 
 def seg_version(gap_s: float = GAP_S, overlap_tol_s: float = OVERLAP_TOL_S, grace_s: float = GRACE_S,
                 poke_minority_share: float = POKE_MINORITY_SHARE, poke_convert_s: float = POKE_CONVERT_S) -> str:
-    """Name of the parameter set that produced a labelled table, e.g. `v1-gap10-tol1-grace3-poke10-conv20`."""
-    return (f"v1-gap{gap_s:g}-tol{overlap_tol_s:g}-grace{grace_s:g}"
+    """Name of the parameter set that produced a labelled table, e.g. `v2-gap10-tol1-grace3-poke10-conv20`.
+    v2 = three-way engagement type (fight / pick / poke); v1 had fight / poke."""
+    return (f"v2-gap{gap_s:g}-tol{overlap_tol_s:g}-grace{grace_s:g}"
             f"-poke{round(100 * poke_minority_share):g}-conv{poke_convert_s:g}")
 
 
@@ -343,8 +360,7 @@ def build_fight_sides(
     second = ranked[:, 1] if ranked.shape[1] > 1 else np.zeros(len(ranked))
     fights["minority_damage_share"] = pd.Series(second / np.where(total > 0, total, 1), index=dealt.index)
     fights["mutual"] = pd.Series((dealt > 0).sum(axis=1) >= 2, index=dealt.index)
-    fights["engagement_type"] = np.where(
-        fights["mutual"] & (fights["minority_damage_share"] >= poke_minority_share), "fight", "poke")
+    one_sided = ~(fights["mutual"] & (fights["minority_damage_share"] >= poke_minority_share))
     if positions is not None:
         eng = eng.assign(dist=hit_distances(eng, positions))
         dist = eng.groupby("fight_id")["dist"].agg(dist_median_m="median", dist_max_m="max")
@@ -378,6 +394,9 @@ def build_fight_sides(
 
     out = agg.rename(columns={"team": "team_index", "opp": "opp_team_index"}).merge(fights.reset_index(), on="fight_id")
     out["outcome"] = [outcome[(f, t)] for f, t in zip(out["fight_id"], out["team_index"])]
+    # fight: both sides dealt; pick: one-sided with a knock in [t0, t_end + grace]; poke: one-sided, no knock
+    decisive = out["outcome"].ne("disengage").groupby(out["fight_id"]).transform("any")
+    out["engagement_type"] = np.where(~out["fight_id"].map(one_sided), "fight", np.where(decisive, "pick", "poke"))
     out["multi_team"] = out["n_teams"] > 2
     out["n"] = out["fight_id"].str.rsplit(":", n=1).str[1].astype(int)
     out = out.sort_values(["match_id", "n", "team_index"], kind="stable").reset_index(drop=True)

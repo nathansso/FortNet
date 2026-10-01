@@ -68,8 +68,12 @@ Source: the `damage`, `positions`, `teams`, `elims` and `players` tables. Implem
 - **Team-pair segments:** per match and team pair, a new segment starts when the gap between hits exceeds `GAP_S` (v1: 10 s; 5 s under review).
 - **Fights:** segments that share a team merge into one fight only when they **truly overlap in time**, within `OVERLAP_TOL_S` (v1: 1 s, swept 0–3 s). Back-to-back fights (A–B ends, then A–C starts) stay separate; the carried-over state (health, position) is captured by the next fight's snapshot at `t0`. Merging on gap proximity instead made 38% of fights multi-team and chained up to 13 teams.
 - **Engagement start** `t0`: the first damage event of the fight. Snapshot features are taken at `t0`, before any damage resolves.
-- **Engagement type** (per fight): `fight` when both sides deal meaningful damage; `poke` when it's one-sided (not `mutual`, or the minority side dealt less than `POKE_MINORITY_SHARE` of total damage; v1 ≈ 10%). See [1.1a](#11a-pokes-and-zone-pressure).
-- **Fight outcome (per side, `engagement_type = fight`):**
+- **Engagement type** (per fight), three-way:
+  - `fight`: both sides deal meaningful damage (`mutual`, and the minority side dealt at least `POKE_MINORITY_SHARE` of total damage; v1 10%).
+  - `pick`: one-sided, and an opposing member is knocked or eliminated in `[t0, t_end + GRACE_S]` (ambush, snipe). Outcome `win` / `loss`, like a fight.
+  - `poke`: one-sided with no knock in that window (zone pressure). See [1.1a](#11a-pokes-and-zone-pressure).
+  - **`engagement_type` is label-only.** It is decided by what happens during and after the engagement (the same goes for `outcome`, `mutual`, `minority_damage_share`, hits and damage, `t_end` and distances: see `LABEL_ONLY_COLUMNS` in `fights.py`). It must never be an input to the fight model or any `t0` snapshot feature. It may only split labels and evaluation. Feature builders call `assert_no_label_features`.
+- **Outcome (per side; `fight` and `pick`, and kept on pokes):**
   - `win` = an opposing member is knocked or eliminated first, within `[t0, t_end + GRACE_S]` (v1: 3 s);
   - `loss` = the reverse;
   - `tie` = both sides' first knocks within 1 s;
@@ -80,14 +84,14 @@ v1 numbers (98 local client replays, `GAP_S` 10 / tolerance 1 / grace 3): 3,217 
 
 ### 1.1a Pokes and zone pressure
 
-In competitive play, a poke is usually zone pressure: a team that rotated early and holds a good position inside the next zone chips a team rotating late across open ground under storm pressure. A poke rarely produces a knock directly. Its value is what it causes next. So pokes are kept as their own engagement type with their own outcome and skill measure, never counted as failed fights.
+In competitive play, a poke is usually zone pressure: a team that rotated early and holds a good position inside the next zone chips a team rotating late across open ground under storm pressure. A poke has no knock inside it or within `GRACE_S` of its end; a one-sided engagement that does knock someone is a `pick` (1.1). A poke's value is what it causes next. So pokes are kept as their own engagement type with their own outcome and skill measure, never counted as failed fights.
 
 **Poke outcomes** (per poke, labeled in `fight_sides` or a sibling table):
 
 | Outcome | Definition (v1, to re-tune on competitive Build data) | Source |
 |---|---|---|
 | Net damage | Damage dealt − damage taken in the poke | `damage` |
-| Conversion | Target knocked or eliminated by **anyone** within `POKE_CONVERT_S` after the poke ends (start 20 s) | `elims` |
+| Conversion | Target knocked or eliminated by **anyone** after the grace window and within `POKE_CONVERT_S` of the poke's end (start 20 s). Reported as by the poker vs. a third party | `elims` |
 | Storm death | Target dies within `POKE_CONVERT_S` while flagged `in_storm` | `players`, `positions` |
 | Forced heal | Target's health/shield rises without a pickup within N s | `health`; recorder-only in client replays, so server replays only |
 | Structure pressure | Damage to structures within ~2 tiles of target players during the poke | `damage` (`target` null) + `positions`; matters in Build, where pokes hit walls and tarps |
@@ -286,7 +290,7 @@ Each feature builder or model that takes a cutoff gets a test in `tests/` showin
 | 2026-10-01 | Splits v1: 20% player holdout (`fnf-holdout-v1`), chronological 70/15/15 by match for fight models, 5-fold out-of-fold residuals (`fnf-folds-v1`), rolling origin by event date for the forecaster | Deterministic and reproducible across sessions. Out-of-fold residuals keep fight-skill features from being shrunk by memorization |
 | 2026-10-01 | Fight-model splits move from match to tournament session once tournament data exists | Matches in one session share players and conditions |
 | 2026-10-01 | Fights merge only on true time overlap (tolerance swept 0–3 s), not gap proximity | Gap-proximity merging made 38% of fights multi-team and chained unrelated back-to-back fights |
-| 2026-10-01 | v1 parameters: `GAP_S` 10 (provisional: 5 under review), `OVERLAP_TOL_S` 1, `GRACE_S` 3, `TIE_S` 1, `POKE_MINORITY_SHARE` 0.10, `POKE_CONVERT_S` 20 | Sweep of 48 GAP/tol/grace cells on 98 replays: recorder-knock coverage 95.7-98.5% everywhere (grace moves it 0.2 pt per step), so fight shape decides. At 10/1/3: 3,217 fights, 20.6% multi-team, 949 labelled two-team fights, p90 duration 18 s. `GAP_S` 5 gives 4,343 fights, 1,126 labelled, p90 9.8 s but splits 745 fights (413 two-team) of the gap-10 set. Poke rule: 83% of two-team disengage sides are one-sided pokes at 0.10, 90% at 0.30. Conversion: 40% of pokes convert within 20 s, but only 5% after the grace window |
+| 2026-10-01 | v1 parameters: `GAP_S` 10 (provisional; to be decided on competitive Build data, no post-knock split rule for now), `OVERLAP_TOL_S` 1, `GRACE_S` 3, `TIE_S` 1, `POKE_MINORITY_SHARE` 0.10, `POKE_CONVERT_S` 20 | Sweep of 48 GAP/tol/grace cells on 98 replays: recorder-knock coverage 95.7-98.5% everywhere (grace moves it 0.2 pt per step), so fight shape decides. At 10/1/3: 3,217 fights, 20.6% multi-team, 949 labelled two-team fights, p90 duration 18 s. `GAP_S` 5 gives 4,343 fights, 1,126 labelled, p90 9.8 s but splits 745 fights (413 two-team) of the gap-10 set. Engagement type (`seg_version` v2) at 0.10: 3,217 fights = 40.8% fight, 15.5% pick, 43.7% poke; of 1,371 decided fights, 872 are fights and 499 picks. Poke conversion after the grace window: 7.2% within 20 s (3.9% by the poker, 3.3% by a third party), 3.2% / 11.3% / 16.2% at 10 / 30 / 45 s |
 | 2026-10-01 | Pokes are a separate engagement type with their own outcomes (conversion, storm death, net damage, structure pressure) and skill measure (PVAE), plus zone and rotation context | Zone-edge poking of late rotators is a core competitive skill; counting pokes as failed fights would lose it |
 | 2026-10-01 | All segmentation and poke thresholds are v1 (tuned on local Zero Build pub replays) and must be re-tuned and relabeled on competitive Build data before training models for pro features; tables carry `seg_version` | Build mode and competitive tempo change damage, gap and poke distributions |
 
@@ -295,6 +299,8 @@ Each feature builder or model that takes a cutoff gets a test in `tests/` showin
 - Do tournament server replays fill in piece `OwnerPersistentID` / `EditingPlayer`? If so, they replace inferred builders.
 - What's the sanctioned source for tournament server replays at scale? See [data_sourcing.md](data_sourcing.md), section 2.
 - Disengage outcome: resolved as its own class for fights; one-sided engagements are pokes with their own outcomes (1.1a).
+- **Fight continuity on Build data (v2 candidate).** In competitive Build play a knocked player can stay down while a teammate boxes up and uses builds to keep pressure off, so a fight can be ongoing with no player-to-player damage (damage mostly hits structures). A gap rule on player damage alone (`GAP_S`) would wrongly end or split such fights. `GAP_S` and the continuation rule are chosen on the competitive Build data we train on. Candidate continuity signals to evaluate: a participant still downed (`positions.downed`), structure damage near opposing players, builds placed by the involved teams near each other, and team proximity.
+- **Knock labels under revives.** "First knock = win" can be wrong when the knocked player is revived. For Build/competitive data, consider labels based on eliminations, or on knocks not revived within the fight.
 - Poke thresholds: `POKE_MINORITY_SHARE`, `POKE_CONVERT_S`, and the structure-pressure radius. Set from competitive Build data.
 - Does poke conversion credit the poker when a third team takes the knock? Proposed yes for team-level zone pressure, reported separately from self-converted pokes.
 - How should duo/trio credit be split: by damage share or by Stage 2 WPA?

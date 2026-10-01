@@ -86,48 +86,54 @@ def v0_vs_v1(damage, teams, elims, players, matches, fights_v0, fs) -> None:
               f"{int((~miss['any_damage_on_participants']).sum())}")
 
 
-def poke_sweep(fs: pd.DataFrame) -> None:
-    """Poke share by POKE_MINORITY_SHARE, from the stored fight-level `mutual` and `minority_damage_share`."""
-    print(f"\n== poke rule sweep (current POKE_MINORITY_SHARE={POKE_MINORITY_SHARE:g}); shares are % of sides ==")
-    f = fs.drop_duplicates("fight_id")
+def type_sweep(fs: pd.DataFrame) -> None:
+    """fight / pick / poke shares by POKE_MINORITY_SHARE, from stored `mutual`, `minority_damage_share`, `outcome`."""
+    print(f"\n== engagement type sweep (current POKE_MINORITY_SHARE={POKE_MINORITY_SHARE:g}); shares are % of fights ==")
+    f = fs.drop_duplicates("fight_id").set_index("fight_id")
+    decisive = fs["outcome"].ne("disengage").groupby(fs["fight_id"]).any().reindex(f.index)
     print(f"fights {len(f):,}; mutual {100 * f['mutual'].mean():.1f}%; "
           f"median distance known for {100 * f['dist_median_m'].notna().mean():.1f}%")
     rows = {}
     for share in (0.0, 0.05, 0.10, 0.15, 0.20, 0.30):
-        poke = ~(fs["mutual"] & (fs["minority_damage_share"] >= share))
-        rows[f"min_share>={share:g}"] = {
-            "disengage sides": poke[fs["outcome"] == "disengage"].mean(),
-            "win/loss sides": poke[fs["outcome"].isin(["win", "loss"])].mean(),
-            "all sides": poke.mean(),
-            "disengage, two-team": poke[(fs["outcome"] == "disengage") & ~fs["multi_team"]].mean(),
+        one_sided = ~(f["mutual"] & (f["minority_damage_share"] >= share))
+        kind = np.where(~one_sided, "fight", np.where(decisive, "pick", "poke"))
+        k = pd.Series(kind, index=f.index)
+        two = ~f["multi_team"]
+        dec = k[decisive]
+        rows[f"share>={share:g}"] = {
+            "fight %": 100 * (k == "fight").mean(), "pick %": 100 * (k == "pick").mean(),
+            "poke %": 100 * (k == "poke").mean(),
+            "decided fights that are picks %": 100 * (dec == "pick").mean(),
+            "two-team: poke %": 100 * (k[two] == "poke").mean(),
         }
-    print((100 * pd.DataFrame(rows)).round(1).to_string())
-    d = fs[(fs["outcome"] == "disengage") & ~fs["multi_team"]].drop_duplicates("fight_id")
-    for kind in ("poke", "fight"):
-        x = d[d["engagement_type"] == kind]
-        print(f"two-team disengage fights typed {kind}: {len(x):,}; median hits (both sides) "
-              f"{(x['hits_dealt'] + x['hits_taken']).median() / 2:.0f}; median shooter distance {x['dist_median_m'].median():.0f} m")
+    print(pd.DataFrame(rows).round(1).to_string())
+    decided = f[decisive]
+    cur = decided["engagement_type"].value_counts()
+    print(f"decided fights at the current setting: {len(decided):,} = " + ", ".join(f"{n} {c:,}" for n, c in cur.items()))
+    for kind in ("fight", "pick", "poke"):
+        x = f[f["engagement_type"] == kind]
+        print(f"{kind}: {len(x):,} fights; median hits {(x['hits_dealt'] + x['hits_taken']).median() / 2:.0f} per side; "
+              f"median shooter distance {x['dist_median_m'].median():.0f} m; two-team {100 * (~x['multi_team']).mean():.0f}%")
 
 
 def convert_sweep(damage, teams, elims, players, positions, fs) -> None:
-    """Poke outcome labels by POKE_CONVERT_S. `delayed` excludes conversions during the poke or within GRACE_S of it."""
-    print(f"\n== poke outcome sweep (current POKE_CONVERT_S={POKE_CONVERT_S:g}) ==")
+    """Poke outcome labels by POKE_CONVERT_S. Conversions count only after the grace window."""
+    print(f"\n== poke outcome sweep (current POKE_CONVERT_S={POKE_CONVERT_S:g}; conversions after GRACE_S only) ==")
     rows = {}
     for conv in (10, 20, 30, 45):
         pk = build_pokes(damage, teams, elims, players, positions, fs, convert_s=conv)
-        delayed = pk["converted"] & (pk["t_convert"] > GRACE_S)
         rows[f"conv {conv}s"] = {
             "pokes": len(pk), "converted %": 100 * pk["converted"].mean(),
             "by poker %": 100 * (pk["converted_by"] == "poker").mean(),
             "by third party %": 100 * (pk["converted_by"] == "third_party").mean(),
             "environment %": 100 * (pk["converted_by"] == "environment").mean(),
-            "delayed (> grace) %": 100 * delayed.mean(), "storm_death": int(pk["storm_death"].sum()),
+            "storm_death": int(pk["storm_death"].sum()),
             "structure hits>0": int((pk["structure_hits"] > 0).sum()),
         }
     print(pd.DataFrame(rows).round(1).to_string())
     pk = build_pokes(damage, teams, elims, players, positions, fs)
-    print(f"net damage median {pk['net_damage'].median():.0f}; poke fights with an in-poke or grace-window knock "
-          f"{100 * (pk['converted'] & (pk['t_convert'] <= GRACE_S)).mean():.1f}% of pokes")
+    print(f"net damage median {pk['net_damage'].median():.0f}; converted t_convert median "
+          f"{pk['t_convert'].median():.1f}s")
 
 
 def main() -> None:
@@ -147,7 +153,7 @@ def main() -> None:
         print("== sweep (shares in %; win/loss/tie/disengage over two-team sides) ==")
         print(fmt.to_string(index=False))
     fs = build_fight_sides(damage, teams, elims, players, matches, positions)
-    poke_sweep(fs)
+    type_sweep(fs)
     convert_sweep(damage, teams, elims, players, positions, fs)
     print(f"\n== v0 vs v1 at defaults (gap {GAP_S:g}, tol {OVERLAP_TOL_S:g}, grace {GRACE_S:g}) ==")
     v0_vs_v1(damage, teams, elims, players, matches, None, fs)

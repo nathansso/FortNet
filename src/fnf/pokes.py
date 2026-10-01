@@ -1,8 +1,9 @@
 """Poke outcome labels (architecture 1.1a): what a poke caused, for fights typed `poke` in `fight_sides`.
 
-A poke is a one-sided (or nearly one-sided) engagement. Its value is what it causes next, so each poke gets:
-net damage, `converted` (a target player knocked/eliminated by anyone soon after), `storm_death`, and structure
-pressure. Forced heal is skipped: `health` is recorder-only in client replays.
+A poke is a one-sided (or nearly one-sided) engagement with NO knock inside it or within GRACE_S of its end
+(one-sided with a knock is a `pick`, scored like a fight). Its value is what it causes next, so each poke gets:
+net damage, `converted` (a target player knocked/eliminated by anyone AFTER the grace window, up to POKE_CONVERT_S),
+`storm_death`, and structure pressure. Forced heal is skipped: `health` is recorder-only in client replays.
 
 These labels look ahead of the poke by design (`POKE_CONVERT_S` after `t_end`). The poke's own `t0`, participants
 and classification never do: they come from `fnf.fights`. All thresholds are v1 values tuned on local Zero Build
@@ -55,16 +56,18 @@ def poke_pairs(eng: pd.DataFrame) -> pd.DataFrame:
     return pairs.merge(span.reset_index(), on="fight_id")
 
 
-def label_conversion(pairs: pd.DataFrame, elims: pd.DataFrame, teams: pd.DataFrame, convert_s: float) -> pd.DataFrame:
-    """`converted`, `converted_by` (poker | third_party | environment), `converter_team`, `t_convert` (seconds after
-    t_end; negative if it happened during the poke) from the first knock/elimination of a target player in
-    [t0, t_end + convert_s]. `environment` = the eliminator is the victim itself or has no team (storm, fall)."""
+def label_conversion(pairs: pd.DataFrame, elims: pd.DataFrame, teams: pd.DataFrame, convert_s: float,
+                     grace_s: float = GRACE_S) -> pd.DataFrame:
+    """`converted_by` (poker | third_party | environment), `converter_team`, `t_convert` (seconds after t_end) from
+    the first knock/elimination of a target player in (t_end + grace_s, t_end + convert_s]. Events up to the end of
+    the grace window belong to the engagement itself (that would make it a pick), so they never count here.
+    `environment` = the eliminator is the victim itself or has no team (storm, fall)."""
     tp = pairs[["fight_id", "match_id", "t0", "t_end", "target_players"]].assign(
         player=pairs["target_players"].str.split(";")).explode("player")
     ev = _objects(elims[["match_id", "t_ms", "eliminator", "eliminated"]], "match_id", "eliminator", "eliminated")
     ev["t"] = ev["t_ms"] / 1000
     m = _objects(tp, "match_id", "player").merge(ev, left_on=["match_id", "player"], right_on=["match_id", "eliminated"])
-    m = m[(m["t"] >= m["t0"]) & (m["t"] <= m["t_end"] + convert_s)].sort_values(["fight_id", "t"], kind="stable")
+    m = m[(m["t"] > m["t_end"] + grace_s) & (m["t"] <= m["t_end"] + convert_s)].sort_values(["fight_id", "t"], kind="stable")
     first = m.drop_duplicates("fight_id").copy()
     first["killer_team"] = team_at(first, "eliminator", "t", teams)
     first = first.merge(pairs[["fight_id", "poker_team"]], on="fight_id")
@@ -150,7 +153,7 @@ def build_pokes(
     if eng.empty:
         return pd.DataFrame({c: [] for c in POKE_COLUMNS})
     pairs = poke_pairs(eng)
-    conv = label_conversion(pairs, elims, teams, convert_s)
+    conv = label_conversion(pairs, elims, teams, convert_s, grace_s)
     storm = set(label_storm_death(pairs, players, positions, convert_s))
     struct = label_structure_pressure(pairs, damage, teams, positions, structure_radius_tiles * TILE_UU)
     out = pairs.merge(conv, on="fight_id", how="left").merge(struct, on="fight_id", how="left")

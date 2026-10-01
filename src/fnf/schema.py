@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from fnf import ROOT
+from fnf import DATA, ROOT
 
 @dataclass(frozen=True)
 class Col:
@@ -118,7 +118,9 @@ _add(Table(
         _c("playlist", "string", True, "e.g. Playlist_RopeSmileNoBuildDuo; null in some Creative modes"),
         _c("utc_start", "string", True, "Match start, UTC ISO-8601"),
         _c("match_end_time", "float", True, unit="s"),
-        _c("max_players", "int", True), _c("team_size", "int", True), _c("total_teams", "int", True),
+        _c("max_players", "int", True),
+        _c("team_size", "int", True, "Unreliable on 2026 builds (decodes to ~11-33); derive team size from teams"),
+        _c("total_teams", "int", True),
         _c("total_bots", "int", True), _c("tournament_round", "int", True), _c("winning_team", "int", True),
         _c("aircraft_start", "float", True, unit="s"),
         _c("replay_owner", "string", True, "Recorder's player_id (inferred: health owner, else most position updates)"),
@@ -405,7 +407,7 @@ def validate_processed() -> None:
     for t in TABLES.values():
         if t.status != "built" or t.layer == "interim":
             continue
-        p = ROOT / t.path
+        p = DATA / t.path.removeprefix("data/")
         if not p.exists():
             print(f"skip   {t.name} (no {t.path})")
             continue

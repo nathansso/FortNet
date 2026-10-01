@@ -9,9 +9,10 @@ using ReplayExport;
 
 var positional = args.Where(a => !a.StartsWith("--")).ToArray();
 var force = args.Contains("--force");
-var root = FindRepoRoot();
-var replayDir = positional.Length > 0 ? positional[0] : Path.Combine(root, "data", "raw", "replays");
-var outRoot = positional.Length > 1 ? positional[1] : Path.Combine(root, "data", "interim", "telemetry");
+// FNF_DATA_DIR overrides <repo>/data (git worktrees have no data/ of their own).
+var dataDir = Environment.GetEnvironmentVariable("FNF_DATA_DIR") is { Length: > 0 } d ? d : Path.Combine(FindRepoRoot(), "data");
+var replayDir = positional.Length > 0 ? positional[0] : Path.Combine(dataDir, "raw", "replays");
+var outRoot = positional.Length > 1 ? positional[1] : Path.Combine(dataDir, "interim", "telemetry");
 
 var files = Directory.EnumerateFiles(replayDir, "*.replay").OrderBy(f => f).ToList();
 int ok = 0, skipped = 0;

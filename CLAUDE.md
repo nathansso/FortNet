@@ -7,6 +7,7 @@ Forecast pro Fortnite placements at Majors/LANs from replay telemetry and result
 - `docs/architecture.md`: the modeling plan (Stages 1–3), leakage rules, **data splits**, evaluation gates, Decisions table.
 - `docs/data_sourcing.md`: where data comes from, the ingest procedure, quality gates, privacy.
 - `docs/data_schema.md`: every table and column. Generated; edit `src/fnf/schema.py`, then run `uv run fnf-schema-doc`.
+- `docs/handoffs/`: scoped plans for parallel workstreams (one branch each). If your prompt names one, it is your plan.
 
 ## Commands
 
@@ -20,6 +21,9 @@ uv run fnf-build-tables                             # typed parquet tables, sche
 uv run fnf-validate && uv run fnf-quality           # schema check + quality gates
 uv run pytest
 ```
+
+In a git worktree, `data/` doesn't exist (it's git-ignored). Point both the Python package and the exporter at the main checkout's data:
+`export FNF_DATA_DIR="C:/Users/noliv/Desktop/coding_projects/fortnite_placement_forecasting/data"`. Treat `data/raw` as shared and append-only. If two sessions run `fnf-build-tables` at once, they overwrite each other's `data/processed`, so coordinate, or give a session its own copy of `data/processed` work.
 
 ## Rules
 

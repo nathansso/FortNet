@@ -114,7 +114,7 @@ One row per replay. Interim file: meta.csv.
 | `utc_start` | string | yes |  | Match start, UTC ISO-8601 |
 | `match_end_time` | float | yes | s |  |
 | `max_players` | int | yes |  |  |
-| `team_size` | int | yes |  |  |
+| `team_size` | int | yes |  | Unreliable on 2026 builds (decodes to ~11-33); derive team size from teams |
 | `total_teams` | int | yes |  |  |
 | `total_bots` | int | yes |  |  |
 | `tournament_round` | int | yes |  |  |
